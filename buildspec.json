@@ -1,45 +1,49 @@
 {
-    "dependencies": {
-        "obs-studio": {
-            "version": "31.1.1",
-            "baseUrl": "https://github.com/obsproject/obs-studio/archive/refs/tags",
-            "label": "OBS sources",
-            "hashes": {
-                "macos": "39751f067bacc13d44b116c5138491b5f1391f91516d3d590d874edd21292291",
-                "windows-x64": "2c8427c10b55ac6d68008df2e9a3e82f4647aaad18f105e30d4713c2de678ccf"
-            }
-        },
-        "prebuilt": {
-            "version": "2025-07-11",
-            "baseUrl": "https://github.com/obsproject/obs-deps/releases/download",
-            "label": "Pre-Built obs-deps",
-            "hashes": {
-                "macos": "495687e63383d1a287684b6e2e9bfe246bb8f156fe265926afb1a325af1edd2a",
-                "windows-x64": "c8c642c1070dc31ce9a0f1e4cef5bb992f4bff4882255788b5da12129e85caa7"
-            }
-        },
-        "qt6": {
-            "version": "2025-07-11",
-            "baseUrl": "https://github.com/obsproject/obs-deps/releases/download",
-            "label": "Pre-Built Qt6",
-            "hashes": {
-                "macos": "d3f5f04b6ea486e032530bdf0187cbda9a54e0a49621a4c8ba984c5023998867",
-                "windows-x64": "0e76bf0555dd5382838850b748d3dcfab44a1e1058441309ab54e1a65b156d0a"
-            },
-            "debugSymbols": {
-                "windows-x64": "11b7be92cf66a273299b8f3515c07a5cfb61614b59a4e67f7fc5ecba5e2bdf21"
-            }
-        }
+  "dependencies": {
+    "obs-studio": {
+      "version": "32.2.2",
+      "baseUrl": "https://github.com/obsproject/obs-studio/archive/refs/tags",
+      "label": "OBS sources",
+      "hashes": {
+        "macos": "39751f067bacc13d44b116c5138491b5f1391f91516d3d590d874edd21292291",
+        "windows-x64": "f15f001f1fa526405318835f44f9910046502f496ebc3a30d5296a5018b831aa"
+      }
     },
-    "platformConfig": {
-        "macos": {
-            "bundleId": "com.example.plugintemplate-for-obs"
-        }
+    "prebuilt": {
+      "version": "2026-07-15",
+      "baseUrl": "https://github.com/obsproject/obs-deps/releases/download",
+      "label": "Pre-Built obs-deps",
+      "hashes": {
+        "macos-universal": "4ecb4c598dfa853168df6c2a0c4e0ffec8495a81fbd1ba051ef88ecd5e0f7e53",
+        "windows-x64": "6f90e9598fa10cff5ad23cdcfae49b87868c07bf896b02cd464582b4ce2f2ba9",
+        "windows-x86": "f33697d7e248b53f38893f02440454b91b0aab05c981c646830521335242fd08",
+        "windows-arm64": "4e7d6835ae36dbc569bf6f88646cb6c4f1f0319b5c13d9d37ba3d19b25b1e240"
+      }
     },
-    "name": "plugintemplate-for-obs",
-    "displayName": "Plugin Template for OBS",
-    "version": "1.0.0",
-    "author": "Your Name Here",
-    "website": "https://example.com",
-    "email": "me@example.com"
+    "qt6": {
+      "version": "2026-07-15",
+      "baseUrl": "https://github.com/obsproject/obs-deps/releases/download",
+      "label": "Pre-Built Qt6",
+      "hashes": {
+        "macos-universal": "d4b8058612a7067e44b2205fe7925ee24e9ec6b15ac8c29d3e6230c70030b102",
+        "windows-x64": "7c7f985711d80467bdc1795b6592275a27d5b0e5a2c7a61db1f2c1d08d6a5579",
+        "windows-arm64": "6d5047a04cad3ecc2615bf8b3df6eb22ec953a458b6cd89253bf131ee4981b90"
+      },
+      "debugSymbols": {
+        "windows-x64": "471d0b2191c424a520a51d064f3741084f117e1ff6ee5af1d16aabcdbacc6659",
+        "windows-arm64": "ffe5b46f6abc81355a4161efdef6cbb2e8862eb053bd2211808c4d4833fcee78"
+      }
+    }
+  },
+  "platformConfig": {
+    "macos": {
+      "bundleId": "com.example.plugintemplate-for-obs"
+    }
+  },
+  "name": "twitch-category-assistant",
+  "displayName": "Twitch Category Assistant",
+  "version": "0.1.0",
+  "author": "Twitch Category Assistant contributors",
+  "website": "",
+  "email": ""
 }
