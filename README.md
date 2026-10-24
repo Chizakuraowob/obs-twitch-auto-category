@@ -1,105 +1,80 @@
-# Twitch Category Assistant
+# Twitch Category Assistant — 開發與發佈指南
 
-Windows 11 x64 的 OBS 原生 Qt Widgets 分類管理 Dock。目標：OBS 32.2.2 / Qt 6.11.1；C++17。
-目前為開發測試版。正式條款、正式隱私政策、真實 Twitch OAuth 與實機驗證狀態見 [驗證紀錄](docs/validation.md)。
+這份文件供作者與貢獻者使用。一般使用者請閱讀 [github_README.md](github_README.md)。
+
+Windows 11 x64 原生 OBS Dock，C++17 / Qt Widgets；目前針對 OBS 32.2.2、Qt 6.11.1 建置。驗證狀態與限制見 [驗證紀錄](docs/validation.md)。
+
+## OAuth：由發佈者配置，一般使用者直接授權
+
+仍使用 OAuth 的 **Public Client Device Code Flow**。正式發行的 DLL 內建公開 Client ID；使用者只需按「連接 Twitch」，在 Twitch 官方網頁登入授權，再返回精靈。使用者不需要 Developer Console、Client Secret 或自行編譯。
+
+發佈者只需在 [Twitch Developer Console](https://dev.twitch.tv/console/apps) 註冊一次 Public 類型應用程式，建置時傳入 Client ID。這是應用程式識別碼，不是密鑰；可以存在公開二進位檔。不要把 Client Secret、Token 或 Stream Key 放入建置參數。
+
+權限為 `channel:manage:broadcast`。登入後驗證 client/user/scope；啟動及每小時驗證 Token，401 時串行刷新。Token 存在目前 Windows 使用者的認證管理員。未完成有效登入，精靈不能進入下一步或標記完成。
+
+未配置 ID 的開發版會顯示說明；作者可在「設定 → 進階與帳號 → 開發者選項」暫時填入 ID。這個測試選項不出現在已內建 ID 的發行版。正式 MSI 封裝命令會拒絕未配置 ID 的建置；`-Preview` 僅供作者檢查安裝流程。
 
 ## 建置
 
-先依 [工具安裝說明](docs/toolchain-setup.md) 安裝 Visual Studio 2026 Build Tools、Windows SDK 26100、CMake 4.2+。
+依 [工具鏈說明](docs/toolchain-setup.md) 安裝 Visual Studio 2026 Build Tools、Windows SDK 26100、CMake 4.2+。一般使用者不需這些工具。
 
 ```powershell
-cd D:\project\twitch-tool-project
+# 發佈者：將以下值換成自己的 Public Client ID
+.\scripts\build.ps1 -ClientId 'YOUR_PUBLIC_CLIENT_ID'
+
+# 本地開發可不指定 ID；保留 CMake cache 內已配置的值
 .\scripts\build.ps1
+# 明確清除內建 ID：.\scripts\build.ps1 -ClientId ''
 ```
 
-腳本透過 vswhere 尋找工具，無須自行修改 PATH。首次 Configure 下載官方 OBS 32.2.2 及 2026-07-15 OBS/Qt 依賴到 `.deps`，驗證 SHA256，建立 OBS 開發函式庫，再編譯外掛、執行 核心測試、打包到 `dist`。不會自動安裝外掛。
+腳本下載並驗證官方 OBS 32.2.2 / OBS dependencies 2026-07-15，編譯、執行測試，將 DLL 與資料放進 `dist/twitch-category-assistant`。不會自行安裝到 OBS，也不包含 Qt DLL；執行時使用 OBS 隨附 Qt。
 
-可分開執行（Developer PowerShell，CMake 已在 PATH）：
+## 產生 MSI
 
 ```powershell
-cmake --preset windows-x64
-cmake --build --preset windows-x64
-# 執行測試前將 .deps/obs-deps-qt6-2026-07-15-x64/bin 加入該終端的 PATH
-ctest --test-dir build_x64 -C RelWithDebInfo --output-on-failure
-cmake --install build_x64 --config RelWithDebInfo --prefix dist
+# 已配置 Client ID 並完成建置後
+.\scripts\package-msi.ps1
+# 作者目前尚未配置 ID 時，只產生明確標示的測試安裝包
+.\scripts\package-msi.ps1 -Preview
 ```
 
-## 安裝至 OBS
+封裝需要 .NET 8 Runtime x64 或更新相容版本（本機已有），不需要 .NET SDK。腳本下載固定 SHA256 的 WiX 4.0.6 和 UI/Util 擴充到 `.tools/wix`，不全域安裝。使用者執行 MSI 不需要 .NET、WiX 或編譯器。
 
-1. 完全關閉 OBS。
-2. 將 `dist/twitch-category-assistant` 整個資料夾複製到 `C:/ProgramData/obs-studio/plugins/`（可能需要管理員權限）。
-3. 目標 DLL 為 `C:/ProgramData/obs-studio/plugins/twitch-category-assistant/bin/64bit/twitch-category-assistant.dll`。
-4. 不要複製 Qt DLL 或覆寫 OBS 隨附 DLL。外掛使用 OBS 的 Qt 執行環境。
-5. 啟動 OBS，在「停駐視窗」選單開啟「Twitch 分類助手」。拖曳標題列可浮動。
-6. 若載入失敗，查看 OBS 日誌與實際 OBS/Qt 版本。未驗證的其他版本不保證相容。
+輸出在 `dist/installer/`，含 MSI 與 SHA256。MSI 安裝至 `%ProgramData%/obs-studio/plugins/twitch-category-assistant`，支援升級與 Windows 已安裝應用程式解除安裝。偵測 OBS 官方安裝登錄路徑；可攜版使用手動安裝。安裝前先結束直播與錄影；安裝器可依提示請求 OBS 正常關閉，不強制終止程序。完成頁可勾選啟動 OBS。靜默安裝遇到 OBS 執行中會失敗，不自動關閉 OBS。
 
-移除：關閉 OBS 後移除此專用外掛資料夾；若要清除帳號憑證，先在外掛登出。
+目前安裝包未簽章，正式法律文件仍為測試草稿。正式發布前需配置真實 ID、更新法律文件及版本、執行 Twitch/OBS/安裝升級移除驗收，並以作者憑證簽章。發布時應一併提供對應來源與 GPL 授權。每次升級增加 `buildspec.json` 的三段版本號；保持 installer 的 UpgradeCode 固定。
 
-## Twitch Developer Console
+## 手動安裝與測試
 
-1. 登入 https://dev.twitch.tv/console/apps ，依 Twitch 要求完成開發者帳號設定。
-2. 註冊應用程式，Client Type 選 **Public**，保存 Client ID。
-3. 本程式只實作 **Device Code Flow**，不使用 Client Secret、回呼伺服器或 Redirect URI。若 Console 表單仍要求 redirect 欄位，依當時表單規則填寫註冊資料；外掛不將該欄位用於登入。
-4. 在外掛「設定」輸入 Client ID，不要輸入 Secret、Token 或 Twitch Stream Key。
-5. 在首次精靈閱讀並勾選兩份待發布測試文件，按登入，於系統瀏覽器的 Twitch 官方頁面授權。
-6. 權限為 `channel:manage:broadcast`。完成後驗證 client/user/scope，使用登入者本人頻道；不支援代管其他主播。
+關閉 OBS，複製 `dist/twitch-category-assistant` 至 `%ProgramData%/obs-studio/plugins/`。`scripts/install-plugin.ps1` 可協助第一次複製，但遇到既有目錄會停止，避免覆蓋未確認的版本。舊的手動安裝轉 MSI 前請先備份並移走舊外掛目錄。
 
-Token 存於 Windows 認證管理員的 `TwitchCategoryAssistant/` 項目。啟動與每小時驗證；401 時單一刷新，失敗則重新登入。登出會清除目前 Client ID 的本機憑證並嘗試撤銷遠端授權，遠端失敗會明確顯示。
+首次啟動 OBS 時會將 Dock 停駐在右側並顯示設定精靈。完成後尊重使用者保存的版面；未完成精靈則下次啟動再次提示。由舊版升級時重新確認精靈完成狀態，以修正舊版允許跳過登入的問題。
 
-## 使用
+```powershell
+# build.ps1 已設定 Qt PATH 並執行下面兩項 CTest
+# tca-tests：設定、程序映射、OAuth、API 更新與錯誤分支
+# tca-ui-check：實際 Qt widgets、同意與登入必填、字級儲存與截圖
+```
 
-- 搜尋分類，選取後按「套用選取分類」。未直播也可使用。
-- 更新狀態區分送出中、已接受／確認中、已讀回確認成功、失敗、結果不確定。
-- 搜尋結果選取真實分類後，可新增對應 `.exe` 檔名的遊戲規則。
-- 設定可編輯程序名稱／優先值及刪除規則。分類 ID 與名稱來自 API；改分類請刪除後重新新增。
-- 預設每次詢問、多遊戲手動選擇、Dock 通知、僅本機 OBS 串流時提供建議。
-- 自動更新需明確規則、候選穩定至少 9 秒、距上次自動更新至少 60 秒，且分類不同。
-- 同一候選的自動修改不無限重試；網路失敗請手動確認或重新啟用自動分類。
-- 手動套用會鎖住自動覆寫，按「恢復自動分類」才解除。
-- 忽略建議直到該分類的候選不再出現。未知遊戲不猜測、不自動修改。
-- 系統／淺／深三種主題；設定精靈可重新開啟。
+實際 Twitch 測試必須由使用者在官方網站授權，不能由 Mock 測試代替。OBS 載入及 MSI 安裝也須另做實機驗證，見 [驗證紀錄](docs/validation.md)。
 
-## 資料與隱私
+## 專案結構
 
-偏好、映射與兩份文件的版本／UTC 同意時間保存在 OBS 回傳的外掛設定目錄 `settings.json`。
-不保存 Token 到設定檔、不記錄 Token、不上傳程序清單、不收集遙測、不讀取遊戲記憶體。
-活動只保留本次工作階段最多 100 筆。損壞設定第一次重存前會備份原檔。
-正式法律文件尚待提供；內建文件皆明確標示測試草稿，版本更換會重新要求同意。
+- `src/plugin/`：OBS 生命週期、首次停駐與串流事件。
+- `src/ui/`：Dock、設定、規則、OAuth 精靈與文件。
+- `src/twitch/`：Device OAuth、Helix、更新後讀回、頻率限制。
+- `src/detection/`：本機程序與映射規則；不注入遊戲。
+- `src/security/`：Windows Credential Manager。
+- `src/settings/`：偏好、文件同意與原子儲存。
+- `tests/`：核心與 UI 回歸測試；Mock 僅在測試使用。
+- `installer/`、`scripts/`：MSI 規格及建置封裝。
 
-## 結構
+## Git 與官方參考
 
-- `src/plugin/`：OBS 生命週期與 Dock
-- `src/ui/`：原生 Dock、設定、規則、首次精靈與文件閱讀
-- `src/twitch/`：Device OAuth、Helix、更新確認、錯誤與頻率限制
-- `src/detection/`：Windows 程序掃描與候選政策
-- `src/security/`：Windows Credential Manager
-- `src/settings/`：設定驗證與原子儲存
-- `tests/`：核心測試 與非網路 Mock transport
-- `scripts/`：建置與經授權的工具安裝
-- `docs/`：決策、安裝、測試與限制
+衍生自 OBS 官方 [obs-plugintemplate](https://github.com/obsproject/obs-plugintemplate)，保留 GPL-2.0-or-later。專案使用本機 Git main；upstream 指向官方模板。尚未設定公開專案 remote 或推送。
 
-## 常見問題與限制
-
-- 空白搜尋結果：必須先登入，搜尋使用真實 Twitch API，不提供假結果。
-- 自動建議沒有出現：檢查映射、暫停、僅直播選項、程序名稱與多候選政策。OBS 串流事件不代表 Twitch 遠端一定已上線。
-- 登入失敗：確認 Public Client Type、Client ID、權限及時間／網路。Device Code Flow 沒有本機 redirect 設定。
-- 429：遵守服務回傳的重設時間；回傳無有效時間時至少等待 60 秒。
-- 204：只表示修改已接受；讀回 ID 相符後才顯示成功。
-- 封面讀取失敗不影響分類功能，顯示無封面。只允許 Twitch 官方圖片 CDN，限制影像大小。
-- Windows 系統通知：本版未實作，設定內停用標示；OBS Dock 通知可用。
-- 程序名稱可能重複／偽裝，映射不是防作弊或身份驗證；不辨識所有遊戲、不注入程序、不要求管理員執行 OBS。
-- 憑證保護依賴目前 Windows 使用者帳號；無法防止已控制該帳號的程式。
-- 不含自動更新器、雲端服務或發布版簽章。
-
-## 版本控制與來源
-
-衍生自 OBS 官方 obs-plugintemplate，保留 GPL-2.0-or-later 授權。模板基準與決策見 docs/decisions.md。
-本機 `main` 為專案分支，`upstream` 指向官方模板；未新增公開遠端或推送。
-
-官方參考：
-- https://github.com/obsproject/obs-studio/blob/32.2.2/CMakePresets.json
-- https://dev.twitch.tv/docs/authentication/getting-tokens-oauth/#device-code-grant-flow
-- https://dev.twitch.tv/docs/authentication/validate-tokens/
-- https://dev.twitch.tv/docs/api/reference/
-- https://docs.obsproject.com/reference-frontend-api
-
+- [Twitch Device Code OAuth](https://dev.twitch.tv/docs/authentication/getting-tokens-oauth/#device-code-grant-flow)
+- [Token 驗證](https://dev.twitch.tv/docs/authentication/validate-tokens/)
+- [Twitch API](https://dev.twitch.tv/docs/api/reference/)
+- [OBS Frontend API](https://docs.obsproject.com/reference-frontend-api)
+- [OBS 32.2.2 建置設定](https://github.com/obsproject/obs-studio/blob/32.2.2/CMakePresets.json)

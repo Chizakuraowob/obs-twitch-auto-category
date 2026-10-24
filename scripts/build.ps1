@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([switch]$ConfigureOnly)
+param([switch]$ConfigureOnly, [ValidatePattern('^[a-zA-Z0-9]*$')][string]$ClientId)
 $ErrorActionPreference = 'Stop'
 $projectDirectory = Split-Path -Parent $PSScriptRoot
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
@@ -10,7 +10,9 @@ $cmake = Join-Path $installation 'Common7\IDE\CommonExtensions\Microsoft\CMake\C
 $ctest = Join-Path (Split-Path -Parent $cmake) 'ctest.exe'
 Push-Location $projectDirectory
 try {
-    & $cmake --preset windows-x64
+    $configureArgs = @('--preset', 'windows-x64')
+    if ($PSBoundParameters.ContainsKey('ClientId')) { $configureArgs += "-DTCA_TWITCH_CLIENT_ID=$ClientId" }
+    & $cmake @configureArgs
     if ($LASTEXITCODE -ne 0) { throw 'CMake configure failed.' }
     if ($ConfigureOnly) { return }
     & $cmake --build --preset windows-x64 --parallel

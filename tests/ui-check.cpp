@@ -5,11 +5,16 @@
 #include <QPushButton>
 #include <QTemporaryDir>
 #include <QWizard>
+#include <QCheckBox>
+#include <QSpinBox>
+#include <QDialogButtonBox>
+#include <QEventLoop>
 #include <cstdio>
 
 int main(int argc, char **argv)
 {
     QApplication app(argc, argv);
+    auto settle = [&] { QEventLoop loop; QTimer::singleShot(180, &loop, &QEventLoop::quit); loop.exec(); };
     QTemporaryDir temp;
     if (!temp.isValid()) return 1;
     tca::Settings settings;
@@ -34,7 +39,13 @@ int main(int argc, char **argv)
         QTimer::singleShot(100, &app, [&] {
             auto *dialog = qobject_cast<QDialog *>(app.activeModalWidget());
             if (!dialog || !dialog->grab().save(output + "/settings-dark.png")) result = 6;
-            if (dialog) dialog->reject();
+            if (dialog) {
+                auto *size = dialog->findChild<QSpinBox *>();
+                if (!size) result = 13;
+                else size->setValue(18);
+                dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Save)->click();
+                if (tca::Settings::load(temp.filePath("settings.json"), &error).fontSize != 18) result = 14;
+            }
         });
         settingsButton->click();
         QTimer::singleShot(100, &app, [&] {
@@ -42,16 +53,38 @@ int main(int argc, char **argv)
             if (!wizard) { result = 7; return; }
             wizard->next(); wizard->next(); app.processEvents();
             if (wizard->button(QWizard::NextButton)->isEnabled()) result = 8;
+            settle();
             if (!wizard->grab().save(output + "/consent-dark.png")) result = 9;
+            for (auto *box : wizard->currentPage()->findChildren<QCheckBox *>()) box->setChecked(true);
+            wizard->next(); app.processEvents();
+            if (wizard->currentId() != 3 || wizard->button(QWizard::NextButton)->isEnabled()) result = 15;
+            wizard->next(); // Even a programmatic Next must not bypass incomplete OAuth.
+            if (wizard->currentId() != 3) result = 16;
+            settle();
+            if (!wizard->grab().save(output + "/login-required.png")) result = 17;
             wizard->reject();
         });
         wizardButton->click();
+        dock.resize(312, 442); app.processEvents();
+        if (!dock.grab().save(output + "/dock-compact-large-font.png")) result = 18;
         dock.stop(); dock.hide();
         QTemporaryDir lightTemp; settings.theme = 1;
         if (!settings.save(lightTemp.filePath("settings.json"), &error)) result = 11;
         tca::Dock light(lightTemp.path()); light.resize(560, 900); light.show(); app.processEvents();
         if (!light.grab().save(output + "/dock-light.png")) result = 12;
-        light.stop(); app.exit(result);
+        light.stop(); light.hide();
+        QTemporaryDir firstTemp;
+        tca::Dock first(firstTemp.path()); first.resize(380, 700); first.show();
+        QEventLoop firstRun;
+        QTimer::singleShot(350, &app, [&] {
+            auto *wizard = qobject_cast<QWizard *>(app.activeModalWidget());
+            if (!wizard || wizard->currentId() != 0) result = 19;
+            if (wizard) { wizard->grab().save(output + "/first-run.png"); wizard->reject(); }
+            firstRun.quit();
+        });
+        first.beginFirstRun(); firstRun.exec();
+        if (!first.needsSetup()) result = 20; // Cancel must not mark first use as complete.
+        first.stop(); app.exit(result);
     });
     QTimer::singleShot(10000, &app, [&] { app.exit(10); });
     const auto code = app.exec();

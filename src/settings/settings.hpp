@@ -11,6 +11,9 @@ struct Rule {
 };
 struct Settings {
     QString clientId;
+    QString fontFamily = QStringLiteral("Microsoft JhengHei UI");
+    int fontSize = 14;
+    bool animations = true;
     int theme = 0; // system, light, dark
     bool automatic = false, notifications = true, liveOnly = true, paused = false;
     int multiGame = 1; // foreground, manual, priority

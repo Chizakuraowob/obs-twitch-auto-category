@@ -195,7 +195,7 @@ void Client::logout()
     const bool erased = !persistTokens || Credentials::erase(id);
     resetSession(); emit authorizationFinished();
     emit status(erased ? "已登出並清除本機憑證" : "已斷開連線，但本機憑證清除失敗");
-    if (access.isEmpty()) { emit activity("本機連線已結束；未確認 Twitch 遠端撤銷狀態"); return; }
+    if (access.isEmpty()) return;
     request("POST", QUrl("https://id.twitch.tv/oauth2/revoke"), form({{"client_id", id}, {"token", access}}), false,
         [this](const Response &r) { emit activity(r.code == 200 && !r.networkError ? "Twitch 授權已撤銷" : "未能確認遠端撤銷；可至 Twitch 連線設定移除此應用程式"); });
 }

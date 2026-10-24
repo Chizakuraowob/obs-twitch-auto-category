@@ -87,6 +87,14 @@ int main(int argc, char **argv)
         CHECK(Settings{}.multiGame == 1); CHECK(!Settings{}.automatic);
         auto changed = loaded; changed.privacyVersion = "old"; CHECK(!changed.consented());
     });
+    run("font preferences and legacy wizard migration", [] {
+        Settings s; s.fontFamily = "Segoe UI"; s.fontSize = 20; s.animations = false; s.wizardDone = true;
+        auto loaded = Settings::fromJson(s.json());
+        CHECK(loaded.fontFamily == s.fontFamily); CHECK(loaded.fontSize == 20); CHECK(!loaded.animations); CHECK(loaded.wizardDone);
+        auto old = s.json(); old.remove("wizardRevision"); old["fontSize"] = 999;
+        loaded = Settings::fromJson(old); CHECK(!loaded.wizardDone); CHECK(loaded.fontSize == 22);
+        old["fontSize"] = -1; CHECK(Settings::fromJson(old).fontSize == 12);
+    });
     run("corrupt settings preserve original file", [] {
         QTemporaryDir temp; const auto path = temp.filePath("settings.json"); QFile file(path); CHECK(file.open(QIODevice::WriteOnly)); file.write("{broken"); file.close();
         QString error; Settings::load(path, &error); CHECK(!error.isEmpty()); CHECK(file.open(QIODevice::ReadOnly)); CHECK(file.readAll() == "{broken");

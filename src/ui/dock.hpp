@@ -19,6 +19,8 @@ public:
     ~Dock() override;
     void setStreaming(bool active);
     void stop();
+    bool needsSetup() const { return !config.wizardDone || !config.consented(); }
+    void beginFirstRun();
 private:
     void save();
     void theme();
@@ -34,17 +36,21 @@ private:
     void applySuggestion();
     void fetchArt(const Category &category);
     void rulesDialog();
+    void setStatus(const QString &message);
+    void animate(QWidget *widget);
+    QString effectiveClientId() const;
     QString directory, settingsPath;
     Settings config;
     Client client;
     QNetworkAccessManager images;
     QFutureWatcher<Processes> watcher;
     QTimer scanTimer, searchTimer;
-    QLabel *accountLabel, *currentLabel, *currentArt, *syncLabel, *statusLabel, *suggestionLabel;
+    QLabel *accountLabel, *currentLabel, *currentArt, *syncLabel, *statusLabel, *suggestionLabel, *searchHint;
     QLineEdit *searchInput;
     QListWidget *searchList, *activityList;
     QComboBox *suggestionChoice;
     QPushButton *connectButton, *searchButton, *applyButton, *moreButton, *suggestionApply, *resumeButton;
+    QPushButton *activityToggle, *mappingButton, *ignoreButton;
     QVector<Category> searchCategories;
     QVector<Candidate> detected;
     QSet<QString> ignored;
@@ -52,6 +58,6 @@ private:
     QSet<QString> pendingArt;
     QString cursor, searchQuery, stableKey, autoAttemptKey;
     qint64 stableSince = 0, lastAuto = 0;
-    bool streaming = false, manualOverride = false, stopped = false, settingsReadError = false;
+    bool streaming = false, manualOverride = false, stopped = false, settingsReadError = false, wizardOpen = false;
 };
 }

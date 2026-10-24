@@ -4,6 +4,13 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/common/bootstrap.cmake" NO_POLICY_SCO
 
 project(${_name} VERSION ${_version})
 
+set(TCA_TWITCH_CLIENT_ID "" CACHE STRING "Publisher's public Twitch application Client ID")
+if(NOT TCA_TWITCH_CLIENT_ID MATCHES "^[a-zA-Z0-9]*$")
+  message(FATAL_ERROR "TCA_TWITCH_CLIENT_ID must contain only letters and digits (never a secret)")
+endif()
+configure_file(src/release-config.hpp.in generated/release-config.hpp @ONLY)
+include_directories("${CMAKE_CURRENT_BINARY_DIR}/generated")
+
 option(ENABLE_FRONTEND_API "Use obs-frontend-api for UI functionality" ON)
 option(ENABLE_QT "Use Qt functionality" ON)
 if(NOT WIN32)

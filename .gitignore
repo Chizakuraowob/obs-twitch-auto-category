@@ -11,6 +11,8 @@
 !/scripts
 !/tests
 !/resources
+!/installer
+!github_README.md
 !.clang-format
 !.gersemirc
 !.gitignore

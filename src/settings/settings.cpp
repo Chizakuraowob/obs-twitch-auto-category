@@ -24,9 +24,9 @@ QJsonObject Settings::json() const
     QJsonArray list;
     for (const auto &r : rules)
         list.append(QJsonObject{{"exe", r.executable}, {"id", r.categoryId}, {"name", r.categoryName}, {"priority", r.priority}});
-    return {{"schema", 1}, {"clientId", clientId}, {"theme", theme}, {"automatic", automatic},
+    return {{"schema", 1}, {"clientId", clientId}, {"theme", theme}, {"fontFamily", fontFamily}, {"fontSize", fontSize}, {"animations", animations}, {"automatic", automatic},
         {"notifications", notifications}, {"liveOnly", liveOnly}, {"paused", paused}, {"multiGame", multiGame},
-        {"wizardDone", wizardDone}, {"termsVersion", termsVersion}, {"privacyVersion", privacyVersion},
+        {"wizardDone", wizardDone}, {"wizardRevision", 2}, {"termsVersion", termsVersion}, {"privacyVersion", privacyVersion},
         {"termsUtc", termsUtc}, {"privacyUtc", privacyUtc}, {"rules", list}};
 }
 Settings Settings::fromJson(const QJsonObject &o)
@@ -35,10 +35,13 @@ Settings Settings::fromJson(const QJsonObject &o)
     s.clientId = o["clientId"].toString().trimmed();
     if (!QRegularExpression("^[a-zA-Z0-9]{0,128}$").match(s.clientId).hasMatch()) s.clientId.clear();
     s.theme = std::clamp(o["theme"].toInt(), 0, 2);
+    s.fontFamily = o["fontFamily"].toString(s.fontFamily).left(128);
+    s.fontSize = std::clamp(o["fontSize"].toInt(14), 12, 22);
+    s.animations = o["animations"].toBool(true);
     s.multiGame = std::clamp(o["multiGame"].toInt(1), 0, 2);
     s.automatic = o["automatic"].toBool(); s.notifications = o["notifications"].toBool(true);
     s.liveOnly = o["liveOnly"].toBool(true); s.paused = o["paused"].toBool();
-    s.wizardDone = o["wizardDone"].toBool();
+    s.wizardDone = o["wizardDone"].toBool() && o["wizardRevision"].toInt() == 2;
     s.termsVersion = o["termsVersion"].toString(); s.privacyVersion = o["privacyVersion"].toString();
     s.termsUtc = o["termsUtc"].toString(); s.privacyUtc = o["privacyUtc"].toString();
     for (const auto &entry : o["rules"].toArray()) {
