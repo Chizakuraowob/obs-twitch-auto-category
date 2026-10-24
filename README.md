@@ -27,7 +27,7 @@ Windows 11 x64 原生 OBS Dock，C++17 / Qt Widgets；目前針對 OBS 32.2.2、
 # 明確清除內建 ID：.\scripts\build.ps1 -ClientId ''
 ```
 
-腳本下載並驗證官方 OBS 32.2.2 / OBS dependencies 2026-07-15，編譯、執行測試，將 DLL 與資料放進 `dist/twitch-category-assistant`。不會自行安裝到 OBS，也不包含 Qt DLL；執行時使用 OBS 隨附 Qt。
+腳本下載並驗證官方 OBS 32.2.2 / OBS dependencies 2026-07-15，編譯、執行測試，將 DLL 與資料放進 `dist/twitch-category-assistant`。執行時使用 OBS 隨附的 Qt 執行環境；額外封裝匹配版本的 `qschannelbackend.dll` 至 `data/qt-plugins/tls`，供 HTTPS 使用，並附其授權與來源資訊。OBS 的 Qt Core／Network／Widgets DLL 不會被替換。
 
 ## 產生 MSI
 
@@ -57,6 +57,14 @@ Windows 11 x64 原生 OBS Dock，C++17 / Qt Widgets；目前針對 OBS 32.2.2、
 ```
 
 實際 Twitch 測試必須由使用者在官方網站授權，不能由 Mock 測試代替。OBS 載入及 MSI 安裝也須另做實機驗證，見 [驗證紀錄](docs/validation.md)。
+
+`tca-tls-check` 會在清除 SDK 的 Qt 插件搜尋路徑後檢查 TLS 封裝。需要實際測試取得 Twitch 授權網址時，將 OBS 的 `bin/64bit` 加入目前終端 PATH，再執行：
+
+```powershell
+.\build_x64\RelWithDebInfo\tca-tls-check.exe .\dist\twitch-category-assistant\data\qt-plugins --device
+```
+
+此檢查使用已內建的 Client ID，只取得裝置授權網址，不開瀏覽器、不輪詢、不保存 Token。發佈安裝包時必須包含整個 data 目錄，單獨複製 DLL 會漏掉 TLS 元件。
 
 ## 專案結構
 

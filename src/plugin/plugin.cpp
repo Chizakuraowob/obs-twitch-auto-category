@@ -6,6 +6,8 @@
 #include <QMainWindow>
 #include <QDockWidget>
 #include <QTimer>
+#include <QCoreApplication>
+#include <QSslSocket>
 #include "ui/dock.hpp"
 
 OBS_DECLARE_MODULE()
@@ -34,7 +36,17 @@ static void eventCallback(enum obs_frontend_event event, void *)
         QMetaObject::invokeMethod(dock, [active] { if (dock) dock->setStreaming(active); }, Qt::QueuedConnection);
     }
 }
-bool obs_module_load(void) { return true; }
+bool obs_module_load(void)
+{
+    // OBS ships Qt Network without a TLS backend; use our matching, privately packaged plugin.
+    if (char *plugins = obs_module_file("qt-plugins")) {
+        QCoreApplication::addLibraryPath(QString::fromUtf8(plugins));
+        bfree(plugins);
+    }
+    const bool tls = QSslSocket::supportsSsl();
+    blog(tls ? LOG_INFO : LOG_ERROR, "[Twitch Category Assistant] HTTPS TLS available: %s", tls ? "yes" : "no");
+    return true;
+}
 void obs_module_post_load(void)
 {
     auto *main = static_cast<QWidget *>(obs_frontend_get_main_window());

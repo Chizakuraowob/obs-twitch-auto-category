@@ -9,7 +9,11 @@
 
 namespace tca {
 struct Category { QString id, name, art; };
-struct Response { int code = 0; QJsonObject object; bool validJson = false; bool networkError = false; };
+struct Response {
+    int code = 0; QJsonObject object; bool validJson = false; bool networkError = false;
+    int networkErrorCode = 0;
+    bool tlsAvailable = true;
+};
 class Client : public QObject {
     Q_OBJECT
 public:

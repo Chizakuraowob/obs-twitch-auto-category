@@ -45,7 +45,15 @@
             <Directory Id="PluginBin" Name="bin"><Directory Id="PluginBin64" Name="64bit">
               <Component Id="PluginDll" Guid="*"><File Source="$(var.Payload)\bin\64bit\twitch-category-assistant.dll" KeyPath="yes" /></Component>
             </Directory></Directory>
-            <Directory Id="PluginData" Name="data"><Directory Id="PluginLocale" Name="locale">
+            <Directory Id="PluginData" Name="data">
+              <Directory Id="PrivateQtPlugins" Name="qt-plugins">
+                <Component Id="QtTlsNotice" Guid="*"><File Source="$(var.Payload)\data\qt-plugins\THIRD_PARTY_NOTICES.txt" KeyPath="yes" /></Component>
+                <Component Id="QtTlsLicense" Guid="*"><File Source="$(var.Payload)\data\qt-plugins\Qt-GPL-2.0.txt" KeyPath="yes" /></Component>
+                <Directory Id="PrivateTls" Name="tls">
+                  <Component Id="SchannelTls" Guid="*"><File Source="$(var.Payload)\data\qt-plugins\tls\qschannelbackend.dll" KeyPath="yes" /></Component>
+                </Directory>
+              </Directory>
+              <Directory Id="PluginLocale" Name="locale">
               <Component Id="ChineseLocale" Guid="*"><File Source="$(var.Payload)\data\locale\zh-TW.ini" KeyPath="yes" /></Component>
               <Component Id="EnglishLocale" Guid="*"><File Source="$(var.Payload)\data\locale\en-US.ini" KeyPath="yes" /></Component>
             </Directory></Directory>
@@ -56,6 +64,7 @@
     <Feature Id="PluginFeature" Title="OBS Twitch 分類助手" Level="1">
       <ComponentRef Id="PluginDll" /><ComponentRef Id="ChineseLocale" /><ComponentRef Id="EnglishLocale" />
       <ComponentRef Id="LicenseFile" /><ComponentRef Id="ReadmeFile" />
+      <ComponentRef Id="SchannelTls" /><ComponentRef Id="QtTlsNotice" /><ComponentRef Id="QtTlsLicense" />
     </Feature>
     <ui:WixUI Id="WixUI_Minimal" />
     <WixVariable Id="WixUILicenseRtf" Value="$(var.LicenseRtf)" />

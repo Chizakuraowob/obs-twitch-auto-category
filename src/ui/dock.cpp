@@ -343,7 +343,7 @@ void Dock::login()
     });
     const auto account = connect(&client, &Client::accountChanged, &dialog, [&] { if (client.connected()) dialog.accept(); });
     const auto status = connect(&client, &Client::status, &dialog, [&](const QString &s) { instructions->setText(s); });
-    const auto finished = connect(&client, &Client::authorizationFinished, &dialog, [&] { open->setEnabled(false); instructions->setText("授權程序已結束，正在確認結果；若未連線請關閉後重試"); });
+    const auto finished = connect(&client, &Client::authorizationFinished, &dialog, [&] { open->setEnabled(false); });
     client.login(effectiveClientId()); const int result = dialog.exec();
     disconnect(auth); disconnect(account); disconnect(status); disconnect(finished);
     if (result != QDialog::Accepted && !client.connected()) client.cancelLogin();

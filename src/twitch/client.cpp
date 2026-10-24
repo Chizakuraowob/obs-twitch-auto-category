@@ -5,6 +5,7 @@
 #include <QNetworkReply>
 #include <QRegularExpression>
 #include <QUrlQuery>
+#include <QSslSocket>
 #include <algorithm>
 
 namespace tca {
@@ -62,6 +63,8 @@ void Client::request(const QByteArray &method, const QUrl &url, const QByteArray
         Response response;
         response.code = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         response.networkError = reply->error() != QNetworkReply::NoError && (response.code == 0 || response.code < 400);
+        response.networkErrorCode = static_cast<int>(reply->error());
+        if (response.networkError) response.tlsAvailable = QSslSocket::supportsSsl();
         QJsonParseError parse;
         const auto bytes = reply->readAll();
         const auto document = bytes.size() <= 2 * 1024 * 1024 ? QJsonDocument::fromJson(bytes, &parse) : QJsonDocument{};
@@ -78,7 +81,12 @@ void Client::request(const QByteArray &method, const QUrl &url, const QByteArray
 }
 QString Client::failure(const Response &r) const
 {
-    if (r.networkError || r.code == 0) return "連線中斷或逾時";
+    if (r.networkError || r.code == 0) {
+        if (!r.tlsAvailable) return "HTTPS 元件載入失敗（TLS）；請重新安裝完整外掛並重啟 OBS";
+        if (r.networkErrorCode == QNetworkReply::SslHandshakeFailedError) return "HTTPS 安全連線驗證失敗；請檢查系統時間、憑證或代理設定";
+        if (r.networkErrorCode == QNetworkReply::HostNotFoundError) return "找不到 Twitch 伺服器；請檢查網路與 DNS";
+        return QString("連線中斷或逾時（網路錯誤 %1）").arg(r.networkErrorCode);
+    }
     if (r.code == 401) return "授權失效，正在嘗試更新授權；請稍後重試";
     if (r.code == 403) return "Twitch 拒絕操作，請確認帳號及權限";
     if (r.code == 429) return "Twitch 請求頻率受限，請稍後再試";
@@ -143,7 +151,8 @@ void Client::pollDevice()
             deviceCode.clear(); emit authorizationFinished(); emit status("授權碼已到期，請重新登入"); return;
         }
         if (acceptTokens(r)) {
-            deviceCode.clear(); validationTimer.start(); emit authorizationFinished(); validate(false); return;
+            deviceCode.clear(); validationTimer.start(); emit authorizationFinished();
+            emit status("已取得授權，正在驗證帳號…"); validate(false); return;
         }
         const auto error = r.object["message"].toString(r.object["error"].toString());
         if (error == "authorization_pending" || error == "slow_down" || r.code == 429 || r.code >= 500 || r.networkError || !r.code) {

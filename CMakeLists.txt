@@ -33,6 +33,13 @@ endif()
 
 if(ENABLE_QT)
   find_package(Qt6 6.11 COMPONENTS Widgets Core Network Concurrent REQUIRED)
+  if(NOT TARGET Qt6::QSchannelBackendPlugin)
+    message(FATAL_ERROR "The matching Qt Schannel TLS plugin is required for HTTPS")
+  endif()
+  install(FILES "$<TARGET_FILE:Qt6::QSchannelBackendPlugin>"
+    DESTINATION "${CMAKE_PROJECT_NAME}/data/qt-plugins/tls")
+  install(FILES "${Qt6_DIR}/../../../licenses/qt6/LICENSE.GPL2"
+    DESTINATION "${CMAKE_PROJECT_NAME}/data/qt-plugins" RENAME Qt-GPL-2.0.txt)
   target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE Qt6::Core Qt6::Widgets Qt6::Network Qt6::Concurrent Advapi32)
   target_compile_options(
     ${CMAKE_PROJECT_NAME}
@@ -69,6 +76,15 @@ if(BUILD_TESTING)
   target_compile_definitions(tca-ui-check PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
   target_link_libraries(tca-ui-check PRIVATE Qt6::Widgets Qt6::Network Qt6::Concurrent Advapi32)
   add_test(NAME tca-ui-check COMMAND tca-ui-check -platform minimal)
+  add_executable(tca-tls-check tests/tls-check.cpp src/twitch/client.cpp src/settings/settings.cpp src/security/credentials.cpp)
+  set_target_properties(tca-tls-check PROPERTIES AUTOMOC ON)
+  target_include_directories(tca-tls-check PRIVATE src)
+  target_link_libraries(tca-tls-check PRIVATE Qt6::Core Qt6::Network Advapi32)
+  add_custom_command(TARGET tca-tls-check POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/tls-runtime/tls"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:Qt6::QSchannelBackendPlugin>" "${CMAKE_CURRENT_BINARY_DIR}/tls-runtime/tls")
+  add_test(NAME tca-tls-missing COMMAND tca-tls-check --expect-unavailable)
+  add_test(NAME tca-tls-packaged COMMAND tca-tls-check "${CMAKE_CURRENT_BINARY_DIR}/tls-runtime")
 endif()
 
 set_target_properties_plugin(${CMAKE_PROJECT_NAME} PROPERTIES OUTPUT_NAME ${_name})

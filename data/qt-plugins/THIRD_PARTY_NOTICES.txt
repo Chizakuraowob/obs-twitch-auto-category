@@ -1,0 +1,15 @@
+Qt Schannel TLS backend (qschannelbackend.dll), Qt 6.11.1
+Copyright (C) The Qt Company Ltd. and other contributors.
+
+This unmodified plugin is distributed under GPL-2.0-only, one of the
+license alternatives declared in the upstream Qt package SBOM.
+The full license is included as Qt-GPL-2.0.txt in this directory.
+
+Source repository and corresponding revision declared by the Qt package:
+https://code.qt.io/cgit/qt/qtbase.git/tree/?id=8683107a02300923abe4f293920f4b5edc8cb624
+Plugin source: src/plugins/tls/schannel
+Build package: obsproject/obs-deps, 2026-07-15, Windows x64 Qt bundle.
+
+This plugin uses Windows Schannel for TLS. It is dynamically loaded from
+the assistant's data/qt-plugins/tls directory. OBS's own Qt DLLs are used;
+they are not replaced by this package.
