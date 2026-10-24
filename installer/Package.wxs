@@ -7,7 +7,12 @@
            UpgradeCode="BF633767-A341-4DDC-9007-BEF9D7DA2F4B">
     <MajorUpgrade DowngradeErrorMessage="已安裝較新的 Twitch 分類助手，請使用相同或更新版本。" />
     <MediaTemplate EmbedCab="yes" />
-    <Launch Condition="Installed OR (VersionNT64 AND WindowsBuild &gt;= 22000)" Message="需要 Windows 11 x64。" />
+    <!-- msiexec can report compatibility values (WindowsBuild=9600) on Windows 11. -->
+    <Property Id="TCA_WINDOWS_BUILD" Secure="yes">
+      <RegistrySearch Id="WindowsActualBuild" Root="HKLM" Key="SOFTWARE\Microsoft\Windows NT\CurrentVersion"
+                      Name="CurrentBuildNumber" Type="raw" Bitness="always64" />
+    </Property>
+    <Launch Condition="Installed OR (VersionNT64 AND TCA_WINDOWS_BUILD &gt;= 22000)" Message="需要 Windows 11 x64。" />
     <Property Id="OBSEXE" Secure="yes">
       <RegistrySearch Id="ObsRegistry" Root="HKLM" Key="SOFTWARE\OBS Studio" Type="directory" Bitness="always64">
         <DirectorySearch Id="ObsBinFolder" Path="bin" Depth="0">
