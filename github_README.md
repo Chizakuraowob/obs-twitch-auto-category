@@ -60,6 +60,12 @@ Twitch 分類助手是開源的 OBS 原生停駐面板。你可以搜尋分類�
 
 ## 常見問題
 
+### Windows 顯示智慧型應用程式控制警告，OBS 說外掛載入失敗？
+
+目前測試版尚未數位簽章，Windows 的應用程式控制可能阻擋 DLL，即使 MSI 安裝成功也不代表 DLL 可以載入。請提供警告中的檔名與 OBS 記錄給作者；不要以關閉系統防護作為安裝步驟。正式簽章發行版尚未提供。
+
+作者可在事件檢視器的 `Microsoft-Windows-CodeIntegrity/Operational` 查看 3077／3033 事件，核對被阻擋的檔案。若 OBS 記錄已出現 `[Twitch Category Assistant] native dock initialized`，代表該次啟動已完成本外掛初始化；其他外掛的錯誤需要另行核對。
+
 **面板不見了？**
 
 在 OBS「停駐視窗」選單勾選「Twitch 分類助手」。首次設定完成後會保留你儲存的面板位置，不會每次啟動都重排版面。

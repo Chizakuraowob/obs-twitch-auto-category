@@ -9,18 +9,23 @@
 #include <QSpinBox>
 #include <QDialogButtonBox>
 #include <QEventLoop>
+#include <QComboBox>
+#include <QAbstractItemView>
+#include <QFile>
 #include <cstdio>
 
 int main(int argc, char **argv)
 {
     QApplication app(argc, argv);
+    // Reproduce host-theme inheritance instead of testing only an unstyled Qt application.
+    app.setStyleSheet("QWidget {color:white;background:#202126;} QComboBox QAbstractItemView {color:white;background:#202126;} QComboBox::down-arrow {image:url(:/missing-host-arrow.svg);} QScrollArea > QWidget > QWidget {background:transparent;}");
+    if (!QFile::exists(":/tca/down.svg") || !QFile::exists(":/tca/up.svg")) return 21;
     auto settle = [&] { QEventLoop loop; QTimer::singleShot(180, &loop, &QEventLoop::quit); loop.exec(); };
     QTemporaryDir temp;
     if (!temp.isValid()) return 1;
     tca::Settings settings;
     settings.theme = 2; settings.wizardDone = true;
-    settings.termsVersion = settings.privacyVersion = tca::DocumentVersion;
-    settings.termsUtc = settings.privacyUtc = "2026-10-24T00:00:00Z";
+    // No consent: never restore the real user's Credential Manager session in UI tests.
     QString error;
     if (!settings.save(temp.filePath("settings.json"), &error)) return 2;
     tca::Dock dock(temp.path()); dock.resize(380, 900); dock.show();
@@ -72,6 +77,17 @@ int main(int argc, char **argv)
         if (!settings.save(lightTemp.filePath("settings.json"), &error)) result = 11;
         tca::Dock light(lightTemp.path()); light.resize(560, 900); light.show(); app.processEvents();
         if (!light.grab().save(output + "/dock-light.png")) result = 12;
+        QTimer::singleShot(100, &app, [&] {
+            auto *dialog = qobject_cast<QDialog *>(app.activeModalWidget());
+            auto *combo = dialog ? dialog->findChild<QComboBox *>() : nullptr;
+            if (!combo) { result = 22; if (dialog) dialog->reject(); return; }
+            combo->showPopup(); settle();
+            if (combo->view()->palette().color(QPalette::Text).lightness() > 100) result = 23;
+            if (!dialog->grab().save(output + "/settings-light.png") ||
+                !combo->view()->window()->grab().save(output + "/theme-popup-light.png")) result = 24;
+            combo->hidePopup(); dialog->reject();
+        });
+        for (auto *button : light.findChildren<QPushButton *>()) if (button->text() == "設定") { button->click(); break; }
         light.stop(); light.hide();
         QTemporaryDir firstTemp;
         tca::Dock first(firstTemp.path()); first.resize(380, 700); first.show();

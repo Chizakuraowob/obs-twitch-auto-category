@@ -74,34 +74,44 @@ static QString themeSheet(const Settings &config)
     const QString edge = dark ? "#34373D" : "#E3E5E9", text = dark ? "#F3F4F6" : "#202329";
     QString family = config.fontFamily; family.remove('\\'); family.remove('\''); family.remove('\n'); family.remove('\r');
     return QString("QWidget {color:%1;background:%2; font-family:'%6';font-size:%5px;}"
-        "QWidget#tcaRoot,QDialog {background:%2;} QScrollArea {border:0;background:transparent;}"
+        "QWidget#tcaRoot,QDialog {background:%2;} QWidget#tcaRoot {border:0;border-radius:0;}"
+        "QScrollArea,QScrollArea > QWidget {border:0;background:%2;border-radius:0;}"
         "QFrame[card=true] {background:%3;border:1px solid %4;border-radius:12px;}"
-        "QLabel {background:transparent;} QLabel[role=heading] {font-weight:600;} QLabel[role=muted] {color:#8E95A2;}"
+        "QLabel {background:transparent;} QLabel[role=heading] {font-weight:600;} QLabel[role=muted] {color:%8;}"
         "QLabel[role=title] {font-weight:700;font-size:%7px;} QLabel[badge=true] {color:#8B7CF6;}"
         "QPushButton,QComboBox,QLineEdit,QSpinBox {background:%3;border:1px solid %4;border-radius:8px;padding:7px;}"
-        "QPushButton:hover {border-color:#8B7CF6;} QPushButton:focus,QLineEdit:focus,QComboBox:focus {border:2px solid #8B7CF6;}"
+        "QPushButton:hover {border-color:#8B7CF6;} QPushButton:focus,QLineEdit:focus,QComboBox:focus {border-color:#8B7CF6;}"
+        "QComboBox,QSpinBox {padding-right:30px;}"
+        "QComboBox QAbstractItemView {color:%1;background:%3;selection-color:white;selection-background-color:#6554CB;border:1px solid %4;padding:4px;outline:0;}"
+        "QComboBox QAbstractItemView::item {color:%1;background:%3;padding:7px;}"
+        "QComboBox QAbstractItemView::item:selected,QComboBox QAbstractItemView::item:hover {color:white;background:#6554CB;}"
+        "QComboBox::drop-down {subcontrol-origin:padding;subcontrol-position:top right;width:28px;border:0;}"
+        "QComboBox::down-arrow {image:url(:/tca/down.svg);width:12px;height:12px;}"
+        "QSpinBox::up-button,QSpinBox::down-button {subcontrol-origin:border;width:26px;border:0;background:transparent;}"
+        "QSpinBox::up-button {subcontrol-position:top right;} QSpinBox::down-button {subcontrol-position:bottom right;}"
+        "QSpinBox::up-arrow {image:url(:/tca/up.svg);width:10px;height:10px;} QSpinBox::down-arrow {image:url(:/tca/down.svg);width:10px;height:10px;}"
         "QPushButton:disabled {color:#81858d;} QPushButton[primary=true] {background:#7565DF;color:white;}"
         "QPushButton[primary=true]:disabled {background:%3;color:#81858d;}"
-        "QPushButton[link=true] {border:0;background:transparent;color:#8B7CF6;text-align:left;padding:3px;}"
+        "QPushButton[link=true] {color:%1;text-align:left;padding:7px 10px;}"
         "QListWidget,QTableWidget,QTextBrowser {background:%3;border:1px solid %4;border-radius:8px;}"
         "QListWidget::item {padding:8px;} QListWidget::item:selected {background:#54478D;color:white;}"
         "QCheckBox {background:transparent;spacing:8px;padding:5px;} QToolTip {background:%3;color:%1;border:1px solid %4;}"
         "QScrollBar:vertical {background:transparent;width:8px;margin:0;} QScrollBar::handle:vertical {background:%4;border-radius:4px;min-height:24px;}"
         "QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical {height:0;} QScrollBar::add-page:vertical,QScrollBar::sub-page:vertical {background:transparent;}")
-        .arg(text, bg, panel, edge).arg(config.fontSize).arg(family).arg(config.fontSize + 3);
+        .arg(text, bg, panel, edge).arg(config.fontSize).arg(family).arg(config.fontSize + 3).arg(dark ? "#A9AFBB" : "#606978");
 }
 Dock::Dock(QString settingsDirectory, QWidget *parent)
     : QWidget(parent), directory(std::move(settingsDirectory)), settingsPath(QDir(directory).filePath("settings.json")), client(this), images(this)
 {
-    setObjectName("tcaRoot"); setMinimumWidth(300);
+    setObjectName("tcaRoot"); setAttribute(Qt::WA_StyledBackground); setMinimumWidth(300);
     QDir().mkpath(directory);
     QString error; config = Settings::load(settingsPath, &error); settingsReadError = !error.isEmpty();
-    auto *outer = new QVBoxLayout(this); outer->setContentsMargins(8, 8, 8, 8); outer->setSpacing(8);
+    auto *outer = new QVBoxLayout(this); outer->setContentsMargins(0, 0, 0, 0); outer->setSpacing(0);
     auto *scroll = new QScrollArea; scroll->setWidgetResizable(true); outer->addWidget(scroll);
     auto *body = new QWidget; body->setObjectName("tcaRoot"); scroll->setWidget(body);
-    auto *layout = new QVBoxLayout(body); layout->setSpacing(10); layout->setContentsMargins(0, 0, 8, 0);
+    auto *layout = new QVBoxLayout(body); layout->setSpacing(10); layout->setContentsMargins(10, 10, 10, 10);
     auto *head = new QHBoxLayout;
-    auto *title = label("Twitch 分類助手"); title->setProperty("role", "title"); head->addWidget(title, 1);
+    auto *title = label("直播分類管理"); title->setProperty("role", "heading"); head->addWidget(title, 1);
     auto *settings = button("設定"); head->addWidget(settings); layout->addLayout(head);
     auto *subtitle = label("讓直播分類跟上你的遊戲"); subtitle->setProperty("role", "muted"); layout->addWidget(subtitle);
     connect(settings, &QPushButton::clicked, this, &Dock::settingsDialog);
@@ -150,7 +160,7 @@ Dock::Dock(QString settingsDirectory, QWidget *parent)
     });
     resumeButton = button("恢復自動分類"); resumeButton->hide(); suggestion->addWidget(resumeButton);
     connect(resumeButton, &QPushButton::clicked, this, [this] { manualOverride = false; autoAttemptKey.clear(); stableKey.clear(); resumeButton->hide(); });
-    auto *statusCard = card(outer, "狀態"); statusLabel = label("連接 Twitch，開始管理分類"); statusLabel->setAccessibleName("分類更新狀態"); statusCard->addWidget(statusLabel);
+    auto *statusCard = card(layout, "狀態"); statusLabel = label("連接 Twitch，開始管理分類"); statusLabel->setAccessibleName("分類更新狀態"); statusCard->addWidget(statusLabel);
     activityToggle = button("最近活動 · 0  ▸"); activityToggle->setProperty("link", true); activityToggle->setCheckable(true); layout->addWidget(activityToggle);
     activityList = new QListWidget; activityList->setMaximumHeight(140); activityList->setWordWrap(true); activityList->hide(); layout->addWidget(activityList);
     connect(activityToggle, &QPushButton::toggled, this, [this](bool expanded) {

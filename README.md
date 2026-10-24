@@ -44,6 +44,10 @@ Windows 11 x64 原生 OBS Dock，C++17 / Qt Widgets；目前針對 OBS 32.2.2、
 
 目前安裝包未簽章，正式法律文件仍為測試草稿。正式發布前需配置真實 ID、更新法律文件及版本、執行 Twitch/OBS/安裝升級移除驗收，並以作者憑證簽章。發布時應一併提供對應來源與 GPL 授權。每次升級增加 `buildspec.json` 的三段版本號；保持 installer 的 UpgradeCode 固定。
 
+Windows Smart App Control 會檢查被 OBS 載入的 DLL，不只 MSI。正式發行需向受信任的憑證機構／簽章服務取得程式碼簽章身分；本機自簽憑證不等於受信任的公開發行簽章。依序簽署外掛 DLL（build 與 dist 必須維持相同檔案）、封裝的 TLS DLL，再產生及簽署 MSI，最後重新產生 MSI SHA256。使用 SHA256 摘要與可信時間戳，並以 Windows SDK SignTool `verify /pa /v` 檢查每個檔案。仍須在啟用 Smart App Control 的測試機驗收；不能宣稱簽章即保證通過所有組織政策。
+
+參考：[Microsoft Smart App Control 簽章說明](https://learn.microsoft.com/windows/apps/develop/smart-app-control/code-signing-for-smart-app-control)。請勿將關閉 Windows 安全防護加入安裝流程。
+
 ## 手動安裝與測試
 
 關閉 OBS，複製 `dist/twitch-category-assistant` 至 `%ProgramData%/obs-studio/plugins/`。`scripts/install-plugin.ps1` 可協助第一次複製，但遇到既有目錄會停止，避免覆蓋未確認的版本。舊的手動安裝轉 MSI 前請先備份並移走舊外掛目錄。

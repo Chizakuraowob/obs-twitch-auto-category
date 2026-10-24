@@ -52,7 +52,7 @@ if(ENABLE_QT)
 endif()
 
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
-  src/plugin/plugin.cpp src/ui/dock.cpp src/ui/dock.hpp
+  src/plugin/plugin.cpp src/ui/dock.cpp src/ui/dock.hpp src/ui/icons.qrc
   src/twitch/client.cpp src/twitch/client.hpp
   src/settings/settings.cpp src/settings/settings.hpp
   src/security/credentials.cpp src/security/credentials.hpp
@@ -71,7 +71,8 @@ if(BUILD_TESTING)
   add_test(NAME tca-tests COMMAND tca-tests)
   add_executable(tca-ui-check tests/ui-check.cpp src/ui/dock.cpp src/settings/settings.cpp src/detection/detector.cpp
     src/twitch/client.cpp src/security/credentials.cpp)
-  set_target_properties(tca-ui-check PROPERTIES AUTOMOC ON)
+  target_sources(tca-ui-check PRIVATE src/ui/icons.qrc)
+  set_target_properties(tca-ui-check PROPERTIES AUTOMOC ON AUTORCC ON)
   target_include_directories(tca-ui-check PRIVATE src)
   target_compile_definitions(tca-ui-check PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
   target_link_libraries(tca-ui-check PRIVATE Qt6::Widgets Qt6::Network Qt6::Concurrent Advapi32)
