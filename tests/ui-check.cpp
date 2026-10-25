@@ -17,6 +17,26 @@
 #include <QFileInfo>
 #include <QMessageBox>
 #include <cstdio>
+#include <QDateTime>
+
+namespace tca {
+struct DockTestAccess {
+    static bool promptOnce(Dock &dock, const WindowEvidence &window) {
+        dock.config.developerMode = true;
+        Processes snapshot; snapshot.windows = {window};
+        dock.updateUnknown(snapshot); dock.unknownSince = QDateTime::currentSecsSinceEpoch() - 7;
+        dock.updateUnknown(snapshot);
+        if (!dock.unknownPrompt || !dock.unknownPrompt->isVisible()) return false;
+        dock.unknownPrompt->reject(); dock.updateUnknown(snapshot);
+        return !dock.unknownPrompt || !dock.unknownPrompt->isVisible();
+    }
+    static void review(Dock &dock, const WindowEvidence &window) {
+        dock.config.developerMode = true;
+        dock.pendingWindow = window; dock.observedWindows = {window};
+        dock.reviewUnknown();
+    }
+};
+}
 
 int main(int argc, char **argv)
 {
@@ -107,6 +127,22 @@ int main(int argc, char **argv)
             combo->hidePopup(); dialog->reject();
         });
         for (auto *button : light.findChildren<QPushButton *>()) if (button->text() == "設定") { button->click(); break; }
+        const tca::WindowEvidence fixture{"unlisted.exe", "GameWindow", "Independent Game", {}, "launcher.exe", {}, true};
+        if (!tca::DockTestAccess::promptOnce(light, fixture)) result = 39;
+        QTimer::singleShot(100, &app, [&] {
+            auto *dialog = qobject_cast<QDialog *>(app.activeModalWidget());
+            auto *category = dialog ? dialog->findChild<QComboBox *>("recognitionCategory") : nullptr;
+            if (!category || category->count() < 2) { result = 34; if (dialog) dialog->reject(); return; }
+            auto *buttons = dialog->findChild<QDialogButtonBox *>();
+            if (buttons->button(QDialogButtonBox::Save)->isEnabled()) result = 35;
+            if (dialog->findChild<QCheckBox *>("recognitionUsePath")->isEnabled()) result = 36;
+            category->setCurrentIndex(1); settle();
+            if (!dialog->grab().save(output + "/recognition-confirm.png")) result = 37;
+            buttons->button(QDialogButtonBox::Save)->click();
+        });
+        tca::DockTestAccess::review(light, fixture);
+        const auto learnedSettings = tca::Settings::load(lightTemp.filePath("settings.json"), &error);
+        if (learnedSettings.recognitionRules.size() != 1 || tca::matchRecognition(fixture, learnedSettings.recognitionRules) != 0) result = 38;
         light.stop(); light.hide();
         QTemporaryDir firstTemp;
         tca::Dock first(firstTemp.path()); first.resize(380, 700); first.show();

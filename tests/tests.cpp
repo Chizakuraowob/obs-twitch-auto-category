@@ -87,6 +87,46 @@ int main(int argc, char **argv)
         try { test(); ++passed; std::printf("PASS %s\n", name); }
         catch (const std::exception &error) { ++failed; std::fprintf(stderr, "FAIL %s: %s\n", name, error.what()); }
     };
+    run("generic learning without readable paths and conflict rejection", [] {
+        WindowEvidence window{"unknown-game.exe", "GameWindow", "New Game", {}, "launcher.exe", "Untrusted hint", true};
+        CHECK(matchRecognition(window, {}) == -1); CHECK(learnedCandidates({window}, {}).isEmpty());
+        RecognitionRule rule{window.executable, window.windowClass, window.title, {}, "42", "Confirmed"};
+        CHECK(validRecognitionRule(rule)); CHECK(matchRecognition(window, {rule}) == 0);
+        CHECK(learnedCandidates({window}, {rule}).size() == 1);
+        auto changed = window; changed.title = "Different Game";
+        CHECK(matchRecognition(changed, {rule}) == -1);
+        CHECK(learnedCandidates({window, changed}, {rule}).isEmpty());
+        auto conflict = rule; conflict.categoryId = "43";
+        CHECK(matchRecognition(window, {rule, conflict}) == -2); CHECK(learnedCandidates({window}, {rule, conflict}).isEmpty());
+        rule.titlePrefix = true; changed.title = "New Game - Level 2";
+        CHECK(matchRecognition(changed, {rule}) == 0);
+        rule.title = "New"; CHECK(!validRecognitionRule(rule));
+        rule = {window.executable, window.windowClass, {}, QString(64, 'a'), "42", "Confirmed"};
+        CHECK(matchRecognition(window, {rule}) == -1);
+        changed.pathHash = rule.pathHash; CHECK(matchRecognition(changed, {rule}) == 0);
+        changed.windowClass = "Launcher"; CHECK(matchRecognition(changed, {rule}) == -1);
+        rule = {window.executable, window.windowClass, window.title, {}, {}, {}, false, true};
+        CHECK(matchRecognition(window, {rule}) == 0); CHECK(learnedCandidates({window}, {rule}).isEmpty());
+        CHECK(!canLearnWindow("obs64.exe")); CHECK(!canLearnWindow("launcher.exe")); CHECK(canLearnWindow("newgame.exe"));
+    });
+    run("learned rules persist and imports are bounded and atomic", [] {
+        RecognitionRule rule{"game.exe", "Window", "Example Game", {}, "42", "Game"};
+        Settings settings; settings.recognitionRules = {rule}; QTemporaryDir temp; QString error;
+        CHECK(settings.save(temp.filePath("settings.json"), &error));
+        const auto loaded = Settings::load(temp.filePath("settings.json"), &error);
+        CHECK(error.isEmpty()); CHECK(loaded.recognitionRules.size() == 1);
+        CHECK(recognitionKey(loaded.recognitionRules[0]) == recognitionKey(rule));
+        const auto encode = [](const QVector<RecognitionRule> &rules) { return QJsonDocument(QJsonObject{{"format", "tca-recognition"}, {"version", 1}, {"rules", recognitionJson(rules)}}).toJson(); };
+        QVector<RecognitionRule> merged;
+        CHECK(importRecognitionRules(encode({rule}), {}, &merged, &error)); CHECK(merged.size() == 1);
+        CHECK(importRecognitionRules(encode({rule}), merged, &merged, &error)); CHECK(merged.size() == 1);
+        auto conflict = rule; conflict.categoryId = "43";
+        CHECK(!importRecognitionRules(encode({conflict}), {rule}, &merged, &error)); CHECK(merged[0].categoryId == "42");
+        CHECK(!importRecognitionRules(encode({rule, rule}), {}, &merged, &error));
+        CHECK(!importRecognitionRules(QByteArray(1024 * 1024 + 1, 'x'), {}, &merged, &error));
+        CHECK(!importRecognitionRules("{}", {}, &merged, &error));
+        rule.executable = "../bad.exe"; CHECK(!importRecognitionRules(encode({rule}), {}, &merged, &error));
+    });
     run("settings round trip, consent versions and defaults", [] {
         QTemporaryDir temp; CHECK(temp.isValid()); Settings s;
         s.clientId = "client123"; s.rules.append({"game.exe", "42", "遊戲", 3});

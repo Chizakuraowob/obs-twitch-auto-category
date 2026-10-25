@@ -10,6 +10,8 @@
 #include <QSettings>
 #include <QMutex>
 #include <QElapsedTimer>
+#include <QCryptographicHash>
+#include <algorithm>
 #include <windows.h>
 #include <tlhelp32.h>
 namespace tca {
@@ -80,10 +82,10 @@ static QVector<InstalledGame> installedGames()
     }
     age.start(); return cached;
 }
-InstalledGame matchInstalledGame(const QString &executablePath, const QVector<InstalledGame> &games)
+InstalledGame matchInstalledGame(const QString &executablePath, const QVector<InstalledGame> &games, bool excludeHelpers)
 {
     const QFileInfo file(executablePath); const auto name = file.fileName().toLower();
-    if (!name.endsWith(".exe") || QRegularExpression("launcher|crash|report|unins|setup|helper|anticheat").match(name).hasMatch()) return {};
+    if (!name.endsWith(".exe") || (excludeHelpers && QRegularExpression("launcher|crash|report|unins|setup|helper|anticheat").match(name).hasMatch())) return {};
     const auto path = file.canonicalFilePath(); if (path.isEmpty()) return {};
     InstalledGame match;
     for (const auto &game : games) {
@@ -113,7 +115,57 @@ RunningGame recognizeStandaloneGame(const QString &executable, const QString &wi
         return {"builtin:nte", "NTE: Neverness to Everness", exe};
     return {};
 }
-struct GameWindows { QHash<DWORD, QString> processes; QVector<Rule> games; QVector<InstalledGame> installed; QVector<RunningGame> running; bool libraries = false; };
+bool canLearnWindow(const QString &executable)
+{
+    const auto exe = executable.toLower();
+    static const QSet<QString> excluded{"obs64.exe", "explorer.exe", "dwm.exe", "taskmgr.exe", "chrome.exe", "msedge.exe", "firefox.exe", "brave.exe", "opera.exe", "cmd.exe", "powershell.exe", "pwsh.exe", "windowsterminal.exe", "code.exe", "codex.exe", "devenv.exe", "searchhost.exe", "applicationframehost.exe"};
+    return validExecutable(exe) && !excluded.contains(exe) && !QRegularExpression("launcher|crash|report|unins|setup|helper|anticheat").match(exe).hasMatch();
+}
+QString windowKey(const WindowEvidence &w)
+{
+    // Include title for pending confirmations, even when a path is readable.
+    return recognitionKey({w.executable, w.windowClass, w.title.simplified(), w.pathHash, {}, {}});
+}
+int matchRecognition(const WindowEvidence &w, const QVector<RecognitionRule> &rules)
+{
+    int found = -1; const auto title = w.title.simplified();
+    for (int i = 0; i < rules.size(); ++i) {
+        const auto &r = rules[i];
+        if (!validRecognitionRule(r) || r.executable.compare(w.executable, Qt::CaseInsensitive) != 0 || r.windowClass != w.windowClass) continue;
+        if (!r.pathHash.isEmpty() && r.pathHash != w.pathHash) continue;
+        if (!r.title.isEmpty() && (r.titlePrefix ? !title.startsWith(r.title, Qt::CaseInsensitive) : title.compare(r.title, Qt::CaseInsensitive) != 0)) continue;
+        if (found >= 0 && (rules[found].categoryId != r.categoryId || rules[found].ignored != r.ignored)) return -2;
+        found = i;
+    }
+    return found;
+}
+QVector<Rule> learnedCandidates(const QVector<WindowEvidence> &windows, const QVector<RecognitionRule> &rules)
+{
+    QVector<Rule> result;
+    QSet<QString> blocked;
+    for (const auto &w : windows) {
+        const int match = matchRecognition(w, rules);
+        if (match < 0 || rules[match].ignored) { blocked.insert(w.executable.toLower()); continue; }
+        const auto &r = rules[match]; result.append({w.executable, r.categoryId, r.categoryName, 0});
+    }
+    result.erase(std::remove_if(result.begin(), result.end(), [&](const Rule &r) { return blocked.contains(r.executable.toLower()); }), result.end());
+    return result;
+}
+static QString processPath(DWORD pid)
+{
+    QString result; const HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (process) {
+        wchar_t path[32768]{}; DWORD length = 32768;
+        if (QueryFullProcessImageNameW(process, 0, path, &length)) result = QDir::fromNativeSeparators(QString::fromWCharArray(path, length));
+        CloseHandle(process);
+    }
+    return result;
+}
+struct GameWindows {
+    QHash<DWORD, QString> processes; QHash<DWORD, DWORD> parents;
+    QVector<Rule> games; QVector<InstalledGame> installed; QVector<RunningGame> running; QVector<WindowEvidence> windows;
+    QStringList learnedExecutables; HWND foreground = nullptr; bool libraries = false, inspectForeground = true;
+};
 static BOOL CALLBACK inspectGameWindow(HWND window, LPARAM parameter)
 {
     if (!IsWindowVisible(window)) return TRUE;
@@ -121,6 +173,19 @@ static BOOL CALLBACK inspectGameWindow(HWND window, LPARAM parameter)
     DWORD pid = 0; GetWindowThreadProcessId(window, &pid);
     const auto exe = context.processes.value(pid);
     if (exe.isEmpty()) return TRUE;
+    const bool inspect = context.learnedExecutables.contains(exe, Qt::CaseInsensitive) ||
+        (context.inspectForeground && window == context.foreground && canLearnWindow(exe));
+    const auto path = (inspect || !context.installed.isEmpty()) ? processPath(pid) : QString{};
+    if (inspect && pid != GetCurrentProcessId()) {
+        wchar_t title[257]{}, windowClass[257]{}; GetWindowTextW(window, title, 257); GetClassNameW(window, windowClass, 257);
+        WindowEvidence evidence; evidence.executable = exe; evidence.title = QString::fromWCharArray(title).simplified(); evidence.windowClass = QString::fromWCharArray(windowClass);
+        if (!path.isEmpty()) evidence.pathHash = QString::fromLatin1(QCryptographicHash::hash(QDir::cleanPath(path).toCaseFolded().toUtf8(), QCryptographicHash::Sha256).toHex());
+        const auto parent = context.parents.value(pid); evidence.parentExecutable = context.processes.value(parent);
+        evidence.foreground = window == context.foreground;
+        // Launcher lineage is only a hint for the confirmation UI, never an automatic match.
+        if (evidence.foreground && !context.installed.isEmpty()) evidence.suggestedName = matchInstalledGame(processPath(parent), context.installed, false).name;
+        if (!evidence.windowClass.isEmpty() && evidence.title.size() >= 2 && GetWindowTextLengthW(window) <= 256) context.windows.append(evidence);
+    }
     if (context.libraries && exe == "htgame.exe") {
         wchar_t title[512]{}; GetWindowTextW(window, title, 512);
         const auto game = recognizeStandaloneGame(exe, QString::fromWCharArray(title));
@@ -136,26 +201,22 @@ static BOOL CALLBACK inspectGameWindow(HWND window, LPARAM parameter)
         if (!game.categoryId.isEmpty()) context.games.append(game);
     }
     if (!context.installed.isEmpty()) {
-        const HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-        if (process) {
-            wchar_t path[32768]{}; DWORD length = 32768;
-            if (QueryFullProcessImageNameW(process, 0, path, &length)) {
-                const auto game = matchInstalledGame(QString::fromWCharArray(path, length), context.installed);
+        if (!path.isEmpty()) {
+                const auto game = matchInstalledGame(path, context.installed);
                 if (!game.key.isEmpty()) {
                     bool duplicate = false; for (const auto &old : context.running) if (old.key == game.key && old.executable == exe) duplicate = true;
                     if (!duplicate) context.running.append({game.key, game.name, exe});
                 }
-            }
-            CloseHandle(process);
         }
     }
     return TRUE;
 }
-Processes scanProcesses(bool libraries)
+Processes scanProcesses(bool libraries, const QStringList &learnedExecutables, bool inspectForeground)
 {
     Processes result;
     GameWindows games;
     games.libraries = libraries;
+    games.learnedExecutables = learnedExecutables; games.inspectForeground = inspectForeground; games.foreground = GetForegroundWindow();
     if (libraries) games.installed = installedGames();
     const HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (snapshot == INVALID_HANDLE_VALUE) return result;
@@ -168,6 +229,7 @@ Processes scanProcesses(bool libraries)
             const auto exe = QString::fromWCharArray(entry.szExeFile).toLower();
             result.executables.append(exe);
             games.processes.insert(entry.th32ProcessID, exe);
+            games.parents.insert(entry.th32ProcessID, entry.th32ParentProcessID);
             if (entry.th32ProcessID == foreground) result.foreground = exe;
         } while (Process32NextW(snapshot, &entry));
     }
@@ -175,6 +237,7 @@ Processes scanProcesses(bool libraries)
     EnumWindows(inspectGameWindow, reinterpret_cast<LPARAM>(&games));
     result.recognizedGames = games.games;
     result.localGames = games.running; result.libraryCount = games.installed.size();
+    result.windows = games.windows;
     result.executables.removeDuplicates();
     return result;
 }

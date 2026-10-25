@@ -24,7 +24,8 @@ public:
     bool needsSetup() const { return !config.wizardDone || !config.consented(); }
     void beginFirstRun();
 private:
-    void save();
+    friend struct DockTestAccess;
+    bool save();
     void theme();
     void settingsDialog();
     void wizard();
@@ -38,6 +39,10 @@ private:
     void refreshFavorites();
     void applySuggestion();
     void notifySuggestion(const Candidate &candidate);
+    void reviewUnknown();
+    void recognitionDialog();
+    void updateUnknown(const Processes &processes);
+    bool rememberRecognition(const RecognitionRule &rule);
     void fetchArt(const Category &category);
     void rulesDialog();
     void setStatus(const QString &message);
@@ -70,6 +75,15 @@ private:
     QString cursor, searchQuery, stableKey, autoAttemptKey;
     QString notificationKey;
     QPointer<QMessageBox> suggestionPrompt;
+    QPointer<QMessageBox> unknownPrompt;
+    WindowEvidence pendingWindow;
+    QVector<WindowEvidence> observedWindows;
+    QLabel *unknownLabel;
+    QPushButton *reviewUnknownButton;
+    QSet<QString> unknownNotified;
+    QString unknownStableKey;
+    qint64 unknownSince = 0;
+    bool reviewingUnknown = false;
     qint64 stableSince = 0, lastAuto = 0;
     bool streaming = false, manualOverride = false, stopped = false, settingsReadError = false, wizardOpen = false;
 };

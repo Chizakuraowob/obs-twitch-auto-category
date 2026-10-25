@@ -92,3 +92,5 @@ Windows Smart App Control 會檢查被 OBS 載入的 DLL，不只 MSI。正式�
 - [OBS 32.2.2 建置設定](https://github.com/obsproject/obs-studio/blob/32.2.2/CMakePresets.json)
 
 0.3.0 的本機遊戲庫辨識與可選聯網查詢，詳見 [資料處理清單](docs/data-processing.md)。發布條款與隱私政策時請依此清單確認來源、傳送項目、保存、刪除及第三方責任；尚未證明涵蓋市場多數遊戲。
+
+0.4.0 新增通用視窗辨識、一次確認後保存、忽略及規則匯入／匯出，不需替新遊戲新增程式規則。設定與資料處理清單已更新；發布前應檢查新版同意草稿、匯出隱私提示及實際遊戲辨識。

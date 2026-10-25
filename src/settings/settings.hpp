@@ -3,14 +3,23 @@
 #include <QString>
 #include <QVector>
 #include <QMap>
+#include <QJsonArray>
 
 namespace tca {
-inline const QString DocumentVersion = QStringLiteral("draft-2026-10-25");
+inline const QString DocumentVersion = QStringLiteral("draft-2026-10-25-recognition-v2");
 struct Rule {
     QString executable, categoryId, categoryName;
     int priority = 0;
 };
 struct Favorite { QString id, name; };
+struct RecognitionRule {
+    QString executable, windowClass, title, pathHash, categoryId, categoryName;
+    bool titlePrefix = false, ignored = false;
+};
+bool validRecognitionRule(const RecognitionRule &rule);
+QString recognitionKey(const RecognitionRule &rule);
+QJsonArray recognitionJson(const QVector<RecognitionRule> &rules);
+bool importRecognitionRules(const QByteArray &data, const QVector<RecognitionRule> &existing, QVector<RecognitionRule> *merged, QString *error);
 struct Settings {
     QString clientId;
     QString fontFamily = QStringLiteral("Microsoft JhengHei UI");
@@ -20,6 +29,8 @@ struct Settings {
     bool automatic = false, notifications = true, liveOnly = true, paused = false;
     bool developerMode = false;
     bool autoDetect = true, detectLibraries = true, allowCategoryLookup = false;
+    bool learnUnknown = true;
+    QVector<RecognitionRule> recognitionRules;
     QMap<QString, Favorite> categoryCache;
     int multiGame = 1; // foreground, manual, priority
     bool wizardDone = false;
