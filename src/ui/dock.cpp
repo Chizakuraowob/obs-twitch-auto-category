@@ -403,7 +403,8 @@ void Dock::processScan()
     const int chosen = chooseCandidate(eligible, processes.foreground, config.multiGame);
     if (chosen >= 0) suggestionChoice->setCurrentIndex(chosen);
     else { suggestionChoice->setCurrentIndex(suggestionChoice->findData(previous)); }
-    suggestionLabel->setText(!processes.available ? "無法讀取程序" : eligible.isEmpty() ? (localGames.isEmpty() ? "尚未偵測到遊戲視窗；可搜尋分類建立程序規則" : "已偵測到本機遊戲，尚未對應 Twitch 分類。搜尋後連結，或在設定允許名稱查詢。") : "來源：本機遊戲庫／內建辨識／自訂映射規則");
+    QStringList gameNames; for (const auto &game : localGames) if (!gameNames.contains(game.name)) gameNames.append(game.name);
+    suggestionLabel->setText(!processes.available ? "無法讀取程序" : eligible.isEmpty() ? (localGames.isEmpty() ? "尚未偵測到遊戲視窗；可搜尋分類建立程序規則" : "已偵測到：" + gameNames.join("、") + (lookupPending ? "\n正在向 Twitch 查詢分類…" : "\n尚未對應 Twitch 分類。搜尋後連結，或在設定允許名稱查詢。")) : "來源：本機遊戲庫／內建辨識／自訂映射規則");
     if (config.developerMode) suggestionLabel->setText("開發者模式 · 本機預演，不更新 Twitch\n" + suggestionLabel->text());
     if (chosen < 0 || !config.suggestionsEnabled(streaming)) { stableKey.clear(); notificationKey.clear(); if (suggestionPrompt) suggestionPrompt->close(); updateAccount(); return; }
     const auto &c = eligible[chosen]; const QString key = c.executable + "/" + c.id;
@@ -461,7 +462,7 @@ void Dock::document(const QString &kind)
     if (kind == "服務條款") text->setPlainText("服務條款：待發布測試草稿\n版本：" + DocumentVersion +
         "\n\n本軟體目前為本機測試版本，正式服務條款尚未發布。\n功能用於讀取與修改你授權的 Twitch 頻道分類。自動更新必須由你在設定中啟用。\n分類更新依賴 Twitch API 與網路，請以讀回確認的狀態為準。\n本草稿僅供測試流程辨識，不表示正式法律文件已完成。");
     else text->setPlainText("隱私權政策：待發布測試草稿\n版本：" + DocumentVersion +
-        "\n\n本外掛會讀取本機程序檔名與前景程序，以比對遊戲映射；Minecraft 辨識另外在本機比對 Java／Minecraft 程序的視窗標題，不儲存或上傳標題。不讀取遊戲記憶體、不擷取畫面。\n本機遊戲庫辨識會讀取 Steam／Epic 安裝紀錄、GOG 登錄資訊與可見視窗所屬程序路徑，只在本機比對。程序清單、路徑、視窗標題及完整遊戲庫不會上傳。\n自動遊戲名稱查詢預設關閉；啟用後將偵測到的遊戲名稱送到 Twitch 官方 API。手動搜尋文字、分類 ID 與 OAuth 必要資料亦送至 Twitch；分類圖片由 Twitch CDN 下載。Twitch 可接收連線 IP 與請求時間。\nToken 存於 Windows 認證管理員；偏好、收藏、平台遊戲 ID 對 Twitch 分類的快取、映射、文件版本與 UTC 同意時間存於 OBS 外掛設定目錄。快取可在設定清除；關閉名稱查詢會停止新增查詢，但不會撤回已送出的請求。\n活動紀錄只留於本次工作階段，沒有遙測或雲端後端。\n你可登出、撤銷授權或清除本機資料。正式資料控制者及聯絡資訊尚待提供，因此本文件不是正式政策。");
+        "\n\n本外掛會讀取本機程序檔名與前景程序，以比對遊戲映射；Minecraft／異環辨識另外在本機比對 Java／Minecraft／HTGame 程序的視窗標題，不儲存或上傳標題。不讀取遊戲記憶體、不擷取畫面。\n本機遊戲庫辨識會讀取 Steam／Epic 安裝紀錄、GOG 登錄資訊與可見視窗所屬程序路徑，只在本機比對。程序清單、路徑、視窗標題及完整遊戲庫不會上傳。\n自動遊戲名稱查詢預設關閉；啟用後將偵測到的遊戲名稱送到 Twitch 官方 API。手動搜尋文字、分類 ID 與 OAuth 必要資料亦送至 Twitch；分類圖片由 Twitch CDN 下載。Twitch 可接收連線 IP 與請求時間。\nToken 存於 Windows 認證管理員；偏好、收藏、平台遊戲 ID 對 Twitch 分類的快取、映射、文件版本與 UTC 同意時間存於 OBS 外掛設定目錄。快取可在設定清除；關閉名稱查詢會停止新增查詢，但不會撤回已送出的請求。\n活動紀錄只留於本次工作階段，沒有遙測或雲端後端。\n你可登出、撤銷授權或清除本機資料。正式資料控制者及聯絡資訊尚待提供，因此本文件不是正式政策。");
     layout->addWidget(text); auto *close = new QDialogButtonBox(QDialogButtonBox::Close); layout->addWidget(close); connect(close, &QDialogButtonBox::rejected, &dialog, &QDialog::reject); dialog.exec();
 }
 void Dock::login()
@@ -500,7 +501,8 @@ void Dock::settingsDialog()
     connect(setup, &QPushButton::clicked, &dialog, [&] { openWizard = true; dialog.reject(); });
     auto *detection = card(layout, "自動偵測與分類更新詢問");
     auto *autoDetect = new QCheckBox("啟用遊戲自動偵測"); autoDetect->setChecked(config.autoDetect); detection->addWidget(autoDetect);
-    auto *libraries = new QCheckBox("讀取本機 Steam／Epic／GOG 遊戲庫"); libraries->setChecked(config.detectLibraries); detection->addWidget(libraries);
+    auto *libraries = new QCheckBox("辨識本機遊戲庫與支援的獨立遊戲"); libraries->setChecked(config.detectLibraries); detection->addWidget(libraries);
+    detection->addWidget(label("支援 Steam／Epic／GOG 安裝紀錄；異環另以程序與遊戲視窗辨識，不要求讀取程序路徑。"));
     detection->addWidget(label(QString("上次掃描：%1 筆安裝紀錄，%2 筆分類對應。遊戲庫約每分鐘重新讀取，程序約每 3 秒偵測。").arg(libraryCount).arg(config.categoryCache.size())));
     auto *lookup = new QCheckBox("向 Twitch 查詢遊戲名稱（聯網）"); lookup->setChecked(config.allowCategoryLookup); detection->addWidget(lookup);
     detection->addWidget(label("預設不傳送偵測資料。啟用後只向 Twitch 傳送正在執行的遊戲名稱與 OAuth 必要資訊；不傳送程序／路徑／完整遊戲庫。僅採用唯一同名分類，結果保存在本機。"));

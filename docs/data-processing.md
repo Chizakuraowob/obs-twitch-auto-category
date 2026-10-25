@@ -8,7 +8,7 @@
 |---|---|---|
 | 程序名稱、前景程序 | Windows 程序快照，用於自訂規則與多遊戲選擇 | 工作階段記憶體，不上傳 |
 | 可見視窗所屬程序的執行檔完整路徑 | Windows PROCESS_QUERY_LIMITED_INFORMATION；比對是否位於已知遊戲安裝目錄 | 暫存於掃描，不寫入設定、不上傳；不提權、不注入 |
-| Minecraft 視窗標題 | 只對 Java／Minecraft 程序讀取，用於區分遊戲與啟動器 | 掃描時比對，不保存、不上傳 |
+| Minecraft／異環視窗標題 | 只對 Java／Minecraft／HTGame 程序讀取，用於區分遊戲與啟動器；異環不依賴路徑讀取 | 掃描時比對，不保存、不上傳 |
 | Steam 遊戲名稱、App ID、安裝目錄 | HKCU Software/Valve/Steam 的 SteamPath，steamapps/libraryfolders.vdf 與 appmanifest_*.acf | 遊戲庫暫存於記憶體，約 60 秒刷新，不上傳整份資料 |
 | Epic 遊戲名稱、AppName、安裝目錄 | ProgramData/Epic/EpicGamesLauncher/Data/Manifests/*.item | 同上；不登入 Epic、不讀取 Epic Token |
 | GOG 遊戲名稱、ID、安裝目錄 | HKLM SOFTWARE/GOG.com/Games 與 WOW6432Node 對應位置 | 同上；不登入 GOG、不讀取 GOG Token |
@@ -37,3 +37,5 @@
 未複製或散布第三方遊戲清單／圖像／程式碼，沒有新增資料庫再散布授權。安裝清單格式可能隨平台更新而改變。平台名稱及遊戲名稱屬各權利人，專案不宣稱獲平台認可。
 
 實作參考：[Twitch Get Games API](https://dev.twitch.tv/docs/api/reference#get-games)、[Epic 本機紀錄格式參考](https://github.com/JosefNemec/PlayniteExtensions/blob/master/source/Libraries/EpicLibrary/EpicLauncher.cs)、[Steam 安裝清單讀取參考](https://github.com/beallio/game-install-finder)。這些為格式與 API 參考，不隨外掛下載或執行。
+
+0.3.1 補充：異環在程序路徑無法讀取時，使用 `HTGame.exe` 加上精確遊戲視窗標題（如去除尾端空白後的 `NTE`）辨識，使用固定本機鍵 `builtin:nte` 儲存分類對應。只有已開啟名稱聯網查詢、完成同意並登入 Twitch 時，才沿用既有 API 查詢 `NTE: Neverness to Everness`。不新增網域、不上傳視窗標題、不要求提高權限或停用防護。可手動搜尋後連結，避開自動查詢。正式名稱參考：[Twitch 分類頁](https://www.twitch.tv/directory/category/neverness-to-everness)。

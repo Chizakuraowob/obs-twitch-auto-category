@@ -78,8 +78,9 @@ int main(int argc, char **argv)
     if (app.arguments().contains("--detect-games")) {
         const auto processes = scanProcesses(); const auto found = candidates(processes, {});
         std::printf("Local library records: %d; running library games: %lld\n", processes.libraryCount, static_cast<long long>(processes.localGames.size()));
+        for (const auto &game : processes.localGames) std::printf("Local game: %s -> %s [%s]\n", game.executable.toUtf8().constData(), game.name.toUtf8().constData(), game.key.toUtf8().constData());
         for (const auto &game : found) std::printf("Detected: %s -> %s (%s)\n", game.executable.toUtf8().constData(), game.name.toUtf8().constData(), game.id.toUtf8().constData());
-        return found.isEmpty() ? 1 : 0;
+        return found.isEmpty() && processes.localGames.isEmpty() ? 1 : 0;
     }
     int passed = 0, failed = 0;
     auto run = [&](const char *name, const std::function<void()> &test) {
@@ -169,6 +170,15 @@ int main(int argc, char **argv)
         CHECK(candidates(p, {}).size() == 1); CHECK(candidates(p, {})[0].id == "27471");
         CHECK(candidates(p, {{"javaw.exe", "42", "Override", 1}})[0].id == "42");
         p.recognizedGames.clear(); CHECK(candidates(p, {}).isEmpty());
+    });
+    run("NTE detection without a process path requires matching executable and window", [] {
+        const auto game = recognizeStandaloneGame("HTGame.exe", "NTE  ");
+        CHECK(game.key == "builtin:nte"); CHECK(game.name == "NTE: Neverness to Everness"); CHECK(validLibraryKey(game.key));
+        CHECK(recognizeStandaloneGame("HTGame.exe", "異環").key == game.key);
+        CHECK(recognizeStandaloneGame("HTGame.exe", "Other Game").key.isEmpty());
+        CHECK(recognizeStandaloneGame("NTETWLauncher.exe", "NTE").key.isEmpty());
+        CHECK(recognizeStandaloneGame("chrome.exe", "NTE").key.isEmpty()); CHECK(!validLibraryKey("builtin:unknown"));
+        Settings s; s.categoryCache.insert(game.key, {"42", game.name}); CHECK(Settings::fromJson(s.json()).categoryCache.contains(game.key));
     });
     run("candidate policies and conflicting mappings", [] {
         Processes p{{"game.exe", "other.exe"}, "OTHER.EXE", true};

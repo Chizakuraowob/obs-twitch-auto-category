@@ -105,7 +105,15 @@ Rule recognizeGame(const QString &executable, const QString &windowTitle)
         return {exe, "27471", "Minecraft", 0};
     return {};
 }
-struct GameWindows { QHash<DWORD, QString> processes; QVector<Rule> games; QVector<InstalledGame> installed; QVector<RunningGame> running; };
+RunningGame recognizeStandaloneGame(const QString &executable, const QString &windowTitle)
+{
+    const auto exe = executable.toLower(), title = windowTitle.trimmed();
+    // Protected game processes may deny path reads; require both known executable and game title.
+    if (exe == "htgame.exe" && (title == "NTE" || title == "異環" || title == "异环" || title == "NTE: Neverness to Everness"))
+        return {"builtin:nte", "NTE: Neverness to Everness", exe};
+    return {};
+}
+struct GameWindows { QHash<DWORD, QString> processes; QVector<Rule> games; QVector<InstalledGame> installed; QVector<RunningGame> running; bool libraries = false; };
 static BOOL CALLBACK inspectGameWindow(HWND window, LPARAM parameter)
 {
     if (!IsWindowVisible(window)) return TRUE;
@@ -113,6 +121,15 @@ static BOOL CALLBACK inspectGameWindow(HWND window, LPARAM parameter)
     DWORD pid = 0; GetWindowThreadProcessId(window, &pid);
     const auto exe = context.processes.value(pid);
     if (exe.isEmpty()) return TRUE;
+    if (context.libraries && exe == "htgame.exe") {
+        wchar_t title[512]{}; GetWindowTextW(window, title, 512);
+        const auto game = recognizeStandaloneGame(exe, QString::fromWCharArray(title));
+        if (!game.key.isEmpty()) {
+            bool duplicate = false; for (const auto &old : context.running) if (old.key == game.key) duplicate = true;
+            if (!duplicate) context.running.append(game);
+            return TRUE;
+        }
+    }
     if (exe == "javaw.exe" || exe == "java.exe" || exe == "minecraft.windows.exe") {
         wchar_t title[512]{}; GetWindowTextW(window, title, 512);
         const auto game = recognizeGame(exe, QString::fromWCharArray(title));
@@ -138,6 +155,7 @@ Processes scanProcesses(bool libraries)
 {
     Processes result;
     GameWindows games;
+    games.libraries = libraries;
     if (libraries) games.installed = installedGames();
     const HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (snapshot == INVALID_HANDLE_VALUE) return result;

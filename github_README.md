@@ -125,3 +125,5 @@ Twitch 接受修改與外掛確認結果是兩個階段。請等讀回確認或�
 感謝 [OBS Project](https://obsproject.com/) 與官方 [obs-plugintemplate](https://github.com/obsproject/obs-plugintemplate) 提供基礎。貢獻紀錄以本專案 Git 歷史及 GitHub Contributors 為準。
 
 採用 [GPL-2.0-or-later](LICENSE)。這是第三方社群外掛，並非 Twitch 官方產品。
+
+異環（0.3.1）：支援 `HTGame.exe` 與 `NTE` 遊戲視窗的本機辨識，即使程序路徑無法讀取也可使用。啟用「辨識本機遊戲庫與支援的獨立遊戲」後，可使用既有聯網查詢或手動連結分類。面板會區分「尚未偵測到」、「已偵測到但未對應」及「正在向 Twitch 查詢」，聯網開關不代表任意遊戲都會自動被辨識。

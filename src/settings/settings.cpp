@@ -10,7 +10,7 @@
 
 namespace tca {
 bool validCategoryId(const QString &id) { return QRegularExpression("^[0-9]{1,20}$").match(id).hasMatch(); }
-bool validLibraryKey(const QString &key) { return QRegularExpression("^(steam|epic|gog):[a-zA-Z0-9._-]{1,128}$").match(key).hasMatch(); }
+bool validLibraryKey(const QString &key) { return key == "builtin:nte" || QRegularExpression("^(steam|epic|gog):[a-zA-Z0-9._-]{1,128}$").match(key).hasMatch(); }
 bool validExecutable(const QString &name)
 {
     return name.size() <= 260 && QRegularExpression("^[^/\\\\:*?\"<>|]+\\.exe$", QRegularExpression::CaseInsensitiveOption).match(name).hasMatch();
