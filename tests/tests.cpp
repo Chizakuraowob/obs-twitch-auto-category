@@ -5,6 +5,7 @@
 #include <QQueue>
 #include <QTemporaryDir>
 #include <QFile>
+#include <QJsonArray>
 #include <QThread>
 #include <cstdio>
 #include <cstring>
@@ -86,6 +87,23 @@ int main(int argc, char **argv)
         CHECK(loaded.rules.size() == 1); CHECK(loaded.rules[0].categoryName == "遊戲");
         CHECK(Settings{}.multiGame == 1); CHECK(!Settings{}.automatic);
         auto changed = loaded; changed.privacyVersion = "old"; CHECK(!changed.consented());
+    });
+    run("favorites persistence, validation and developer scan policy", [] {
+        Settings s; s.favorites = {{"42", "Just Chatting"}, {"43", "遊戲"}}; s.developerMode = true;
+        QTemporaryDir temp; QString error; CHECK(s.save(temp.filePath("settings.json"), &error));
+        auto loaded = Settings::load(temp.filePath("settings.json"), &error);
+        CHECK(loaded.favorites.size() == 2); CHECK(loaded.favorites[0].name == "Just Chatting"); CHECK(loaded.developerMode);
+        CHECK(loaded.suggestionsEnabled(false)); loaded.paused = true; CHECK(!loaded.suggestionsEnabled(false));
+        CHECK(!Settings{}.suggestionsEnabled(false)); CHECK(Settings{}.suggestionsEnabled(true));
+        auto json = s.json(); QJsonArray entries;
+        entries.append(QJsonObject{{"id", "42"}, {"name", "First"}});
+        entries.append(QJsonObject{{"id", "42"}, {"name", "Duplicate"}});
+        entries.append(QJsonObject{{"id", "bad"}, {"name", "Invalid"}});
+        entries.append(QJsonObject{{"id", "43"}, {"name", " "}});
+        json["favorites"] = entries; CHECK(Settings::fromJson(json).favorites.size() == 1);
+        entries = {}; for (int i = 1; i <= 105; ++i) entries.append(QJsonObject{{"id", QString::number(i)}, {"name", "Game"}});
+        json["favorites"] = entries; CHECK(Settings::fromJson(json).favorites.size() == 100);
+        CHECK(Settings::fromJson({}).favorites.isEmpty()); CHECK(!Settings::fromJson({}).developerMode);
     });
     run("font preferences and legacy wizard migration", [] {
         Settings s; s.fontFamily = "Segoe UI"; s.fontSize = 20; s.animations = false; s.wizardDone = true;

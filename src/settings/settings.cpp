@@ -5,6 +5,7 @@
 #include <QJsonDocument>
 #include <QRegularExpression>
 #include <QSaveFile>
+#include <QSet>
 #include <algorithm>
 
 namespace tca {
@@ -24,8 +25,11 @@ QJsonObject Settings::json() const
     QJsonArray list;
     for (const auto &r : rules)
         list.append(QJsonObject{{"exe", r.executable}, {"id", r.categoryId}, {"name", r.categoryName}, {"priority", r.priority}});
+    QJsonArray savedFavorites;
+    for (const auto &f : favorites) savedFavorites.append(QJsonObject{{"id", f.id}, {"name", f.name}});
     return {{"schema", 1}, {"clientId", clientId}, {"theme", theme}, {"fontFamily", fontFamily}, {"fontSize", fontSize}, {"animations", animations}, {"automatic", automatic},
         {"notifications", notifications}, {"liveOnly", liveOnly}, {"paused", paused}, {"multiGame", multiGame},
+        {"developerMode", developerMode}, {"favorites", savedFavorites},
         {"wizardDone", wizardDone}, {"wizardRevision", 2}, {"termsVersion", termsVersion}, {"privacyVersion", privacyVersion},
         {"termsUtc", termsUtc}, {"privacyUtc", privacyUtc}, {"rules", list}};
 }
@@ -41,6 +45,15 @@ Settings Settings::fromJson(const QJsonObject &o)
     s.multiGame = std::clamp(o["multiGame"].toInt(1), 0, 2);
     s.automatic = o["automatic"].toBool(); s.notifications = o["notifications"].toBool(true);
     s.liveOnly = o["liveOnly"].toBool(true); s.paused = o["paused"].toBool();
+    s.developerMode = o["developerMode"].toBool();
+    QSet<QString> favoriteIds;
+    for (const auto &entry : o["favorites"].toArray()) {
+        const auto f = entry.toObject();
+        Favorite favorite{f["id"].toString(), f["name"].toString().trimmed().left(256)};
+        if (validCategoryId(favorite.id) && !favorite.name.isEmpty() && !favoriteIds.contains(favorite.id) && s.favorites.size() < 100) {
+            favoriteIds.insert(favorite.id); s.favorites.append(favorite);
+        }
+    }
     s.wizardDone = o["wizardDone"].toBool() && o["wizardRevision"].toInt() == 2;
     s.termsVersion = o["termsVersion"].toString(); s.privacyVersion = o["privacyVersion"].toString();
     s.termsUtc = o["termsUtc"].toString(); s.privacyUtc = o["privacyUtc"].toString();

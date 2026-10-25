@@ -12,19 +12,23 @@
 #include <QComboBox>
 #include <QAbstractItemView>
 #include <QFile>
+#include <QListWidget>
+#include <QSignalBlocker>
+#include <QFileInfo>
 #include <cstdio>
 
 int main(int argc, char **argv)
 {
     QApplication app(argc, argv);
     // Reproduce host-theme inheritance instead of testing only an unstyled Qt application.
-    app.setStyleSheet("QWidget {color:white;background:#202126;} QComboBox QAbstractItemView {color:white;background:#202126;} QComboBox::down-arrow {image:url(:/missing-host-arrow.svg);} QScrollArea > QWidget > QWidget {background:transparent;}");
+    app.setStyleSheet("QWidget {color:white;background:#202126;} QListWidget::item {color:white;} QListWidget::item:selected {background:#393d49;} QComboBox QAbstractItemView {color:white;background:#202126;} QComboBox::down-arrow {image:url(:/missing-host-arrow.svg);} QScrollArea > QWidget > QWidget {background:transparent;}");
     if (!QFile::exists(":/tca/down.svg") || !QFile::exists(":/tca/up.svg")) return 21;
     auto settle = [&] { QEventLoop loop; QTimer::singleShot(180, &loop, &QEventLoop::quit); loop.exec(); };
     QTemporaryDir temp;
     if (!temp.isValid()) return 1;
     tca::Settings settings;
     settings.theme = 2; settings.wizardDone = true;
+    settings.favorites = {{"509658", "Just Chatting"}, {"42", "測試遊戲"}};
     // No consent: never restore the real user's Credential Manager session in UI tests.
     QString error;
     if (!settings.save(temp.filePath("settings.json"), &error)) return 2;
@@ -77,6 +81,15 @@ int main(int argc, char **argv)
         if (!settings.save(lightTemp.filePath("settings.json"), &error)) result = 11;
         tca::Dock light(lightTemp.path()); light.resize(560, 900); light.show(); app.processEvents();
         if (!light.grab().save(output + "/dock-light.png")) result = 12;
+        auto *favorites = light.findChild<QComboBox *>("favoriteChoice");
+        if (!favorites || favorites->count() != 2 || light.findChild<QPushButton *>("favoriteApply")->isEnabled()) result = 25;
+        light.findChild<QPushButton *>("favoriteRemove")->click();
+        if (tca::Settings::load(lightTemp.filePath("settings.json"), &error).favorites.size() != 1) result = 26;
+        auto *results = light.findChild<QListWidget *>("searchResults");
+        { const QSignalBlocker blocker(results); results->addItems({"Just Cause", "Just Cause 2", "Just Dance"}); results->setCurrentRow(0); }
+        results->show(); results->setFixedHeight(180);
+        app.processEvents();
+        if (results->palette().color(QPalette::Text).lightness() > 100 || !results->grab().save(output + "/search-results-light.png")) result = 27;
         QTimer::singleShot(100, &app, [&] {
             auto *dialog = qobject_cast<QDialog *>(app.activeModalWidget());
             auto *combo = dialog ? dialog->findChild<QComboBox *>() : nullptr;
@@ -100,9 +113,23 @@ int main(int argc, char **argv)
         });
         first.beginFirstRun(); firstRun.exec();
         if (!first.needsSetup()) result = 20; // Cancel must not mark first use as complete.
-        first.stop(); app.exit(result);
+        first.stop(); first.hide();
+        QTemporaryDir devTemp; tca::Settings devSettings;
+        devSettings.developerMode = true; devSettings.automatic = true; devSettings.multiGame = 2;
+        devSettings.rules.append({QFileInfo(QCoreApplication::applicationFilePath()).fileName().toLower(), "42", "本機程序預演測試", 1});
+        if (!devSettings.save(devTemp.filePath("settings.json"), &error)) result = 28;
+        tca::Dock developer(devTemp.path()); developer.resize(380, 900); developer.show();
+        QEventLoop preview;
+        QTimer::singleShot(14500, &preview, &QEventLoop::quit); preview.exec();
+        bool previewLogged = false;
+        for (auto *list : developer.findChildren<QListWidget *>())
+            for (int i = 0; i < list->count(); ++i)
+                if (list->item(i)->text().contains("開發者預演：依規則自動套用")) previewLogged = true;
+        if (!previewLogged) result = 29;
+        developer.grab().save(output + "/developer-preview.png");
+        developer.stop(); app.exit(result);
     });
-    QTimer::singleShot(10000, &app, [&] { app.exit(10); });
+    QTimer::singleShot(25000, &app, [&] { app.exit(10); });
     const auto code = app.exec();
     std::printf("UI smoke result: %d; renders: %s\n", code, output.toUtf8().constData());
     return code;

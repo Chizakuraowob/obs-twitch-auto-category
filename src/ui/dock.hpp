@@ -33,6 +33,7 @@ private:
     void scan();
     void processScan();
     void applySelected();
+    void refreshFavorites();
     void applySuggestion();
     void fetchArt(const Category &category);
     void rulesDialog();
@@ -48,7 +49,8 @@ private:
     QLabel *accountLabel, *currentLabel, *currentArt, *syncLabel, *statusLabel, *suggestionLabel, *searchHint;
     QLineEdit *searchInput;
     QListWidget *searchList, *activityList;
-    QComboBox *suggestionChoice;
+    QComboBox *suggestionChoice, *favoriteChoice;
+    QPushButton *favoriteAdd, *favoriteApply, *favoriteRemove;
     QPushButton *connectButton, *searchButton, *applyButton, *moreButton, *suggestionApply, *resumeButton;
     QPushButton *activityToggle, *mappingButton, *ignoreButton;
     QVector<Category> searchCategories;
