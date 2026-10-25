@@ -6,6 +6,8 @@
 #include <QWidget>
 #include <QSet>
 #include <QPixmap>
+#include <QPointer>
+class QMessageBox;
 class QLabel;
 class QPushButton;
 class QLineEdit;
@@ -35,6 +37,7 @@ private:
     void applySelected();
     void refreshFavorites();
     void applySuggestion();
+    void notifySuggestion(const Candidate &candidate);
     void fetchArt(const Category &category);
     void rulesDialog();
     void setStatus(const QString &message);
@@ -59,6 +62,8 @@ private:
     QHash<QString, QPixmap> artCache;
     QSet<QString> pendingArt;
     QString cursor, searchQuery, stableKey, autoAttemptKey;
+    QString notificationKey;
+    QPointer<QMessageBox> suggestionPrompt;
     qint64 stableSince = 0, lastAuto = 0;
     bool streaming = false, manualOverride = false, stopped = false, settingsReadError = false, wizardOpen = false;
 };

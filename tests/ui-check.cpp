@@ -15,6 +15,7 @@
 #include <QListWidget>
 #include <QSignalBlocker>
 #include <QFileInfo>
+#include <QMessageBox>
 #include <cstdio>
 
 int main(int argc, char **argv)
@@ -126,6 +127,12 @@ int main(int argc, char **argv)
             for (int i = 0; i < list->count(); ++i)
                 if (list->item(i)->text().contains("開發者預演：依規則自動套用")) previewLogged = true;
         if (!previewLogged) result = 29;
+        auto *prompt = developer.findChild<QMessageBox *>("categorySuggestionPrompt");
+        if (!prompt || !prompt->isVisible() || !prompt->text().contains("本機程序預演測試")) result = 30;
+        if (prompt && !prompt->grab().save(output + "/category-suggestion.png")) result = 32;
+        if (prompt) prompt->reject();
+        QEventLoop noRepeat; QTimer::singleShot(3500, &noRepeat, &QEventLoop::quit); noRepeat.exec();
+        if (auto *repeated = developer.findChild<QMessageBox *>("categorySuggestionPrompt"); repeated && repeated->isVisible()) result = 31;
         developer.grab().save(output + "/developer-preview.png");
         developer.stop(); app.exit(result);
     });

@@ -73,6 +73,11 @@ static void authenticate(Client &client, Transport &net) {
 int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
+    if (app.arguments().contains("--detect-games")) {
+        const auto found = candidates(scanProcesses(), {});
+        for (const auto &game : found) std::printf("Detected: %s -> %s (%s)\n", game.executable.toUtf8().constData(), game.name.toUtf8().constData(), game.id.toUtf8().constData());
+        return found.isEmpty() ? 1 : 0;
+    }
     int passed = 0, failed = 0;
     auto run = [&](const char *name, const std::function<void()> &test) {
         try { test(); ++passed; std::printf("PASS %s\n", name); }
@@ -116,6 +121,19 @@ int main(int argc, char **argv)
     run("corrupt settings preserve original file", [] {
         QTemporaryDir temp; const auto path = temp.filePath("settings.json"); QFile file(path); CHECK(file.open(QIODevice::WriteOnly)); file.write("{broken"); file.close();
         QString error; Settings::load(path, &error); CHECK(!error.isEmpty()); CHECK(file.open(QIODevice::ReadOnly)); CHECK(file.readAll() == "{broken");
+    });
+    run("Minecraft recognition without manual rules and Java false positives", [] {
+        const auto minecraft = recognizeGame("javaw.exe", "Minecraft* 1.21.11");
+        CHECK(minecraft.categoryId == "27471");
+        CHECK(recognizeGame("java.exe", "Minecraft 1.20.1 - Forge").categoryId == "27471");
+        CHECK(recognizeGame("Minecraft.Windows.exe", "Minecraft").categoryId == "27471");
+        CHECK(recognizeGame("javaw.exe", "Minecraft Launcher").categoryId.isEmpty());
+        CHECK(recognizeGame("javaw.exe", "Java application").categoryId.isEmpty());
+        CHECK(recognizeGame("chrome.exe", "Minecraft 1.21.11").categoryId.isEmpty());
+        Processes p{{"javaw.exe"}, "javaw.exe", true, {minecraft}};
+        CHECK(candidates(p, {}).size() == 1); CHECK(candidates(p, {})[0].id == "27471");
+        CHECK(candidates(p, {{"javaw.exe", "42", "Override", 1}})[0].id == "42");
+        p.recognizedGames.clear(); CHECK(candidates(p, {}).isEmpty());
     });
     run("candidate policies and conflicting mappings", [] {
         Processes p{{"game.exe", "other.exe"}, "OTHER.EXE", true};

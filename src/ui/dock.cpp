@@ -243,6 +243,7 @@ void Dock::stop()
 {
     if (stopped) return;
     stopped = true; scanTimer.stop(); searchTimer.stop(); client.shutdown();
+    if (suggestionPrompt) suggestionPrompt->close();
     watcher.disconnect(this); watcher.waitForFinished();
 }
 void Dock::setStreaming(bool active) { streaming = active; stableKey.clear(); scan(); }
@@ -310,10 +311,34 @@ void Dock::applySuggestion()
     if (!config.consented()) return;
     for (const auto &c : detected) if (c.id == id) { addActivity("使用者套用建議：" + c.name); client.apply({c.id, c.name, {}}); return; }
 }
+void Dock::notifySuggestion(const Candidate &candidate)
+{
+    if (suggestionPrompt) suggestionPrompt->close();
+    auto *prompt = new QMessageBox(QMessageBox::Information, "偵測到遊戲 · 分類更新建議",
+        QString("偵測到：%1\n目前 Twitch 分類：%2\n%3")
+            .arg(candidate.name, client.current().name.isEmpty() ? "尚未取得" : client.current().name,
+                 config.developerMode ? "開發者模式：只預演，不修改 Twitch。" : "要更新直播分類嗎？"), QMessageBox::NoButton, this);
+    suggestionPrompt = prompt; prompt->setObjectName("categorySuggestionPrompt");
+    prompt->setAttribute(Qt::WA_ShowWithoutActivating);
+    prompt->setAttribute(Qt::WA_DeleteOnClose); prompt->setWindowModality(Qt::NonModal); prompt->setStyleSheet(themeSheet(config));
+    auto *apply = prompt->addButton(config.developerMode ? "預演套用" : "更新分類", QMessageBox::AcceptRole);
+    auto *dismiss = prompt->addButton("稍後再說", QMessageBox::RejectRole); prompt->setDefaultButton(dismiss);
+    apply->setEnabled(config.developerMode || (config.consented() && client.connected() && !client.busy()));
+    const bool preview = config.developerMode;
+    connect(prompt, &QMessageBox::buttonClicked, this, [this, apply, candidate, preview](QAbstractButton *clicked) {
+        if (clicked != apply || stopped || preview != config.developerMode || !config.suggestionsEnabled(streaming)) return;
+        bool stillDetected = false; for (const auto &c : detected) if (c.id == candidate.id && c.executable == candidate.executable) stillDetected = true;
+        if (!stillDetected) return;
+        if (preview) addActivity("開發者預演：" + candidate.name + "（未更新 Twitch）");
+        else if (config.consented() && client.connected() && !client.busy()) { addActivity("使用者確認建議：" + candidate.name); client.apply({candidate.id, candidate.name, {}}); }
+    });
+    prompt->show();
+}
 void Dock::scan()
 {
     if (stopped || (!config.consented() && !config.developerMode)) return;
     if (!config.suggestionsEnabled(streaming)) {
+        if (suggestionPrompt) suggestionPrompt->close(); notificationKey.clear();
         suggestionChoice->clear(); suggestionApply->setEnabled(false); stableKey.clear();
         suggestionLabel->setText(config.paused ? "已暫停分類建議" : "尚未開始 OBS 串流；手動搜尋仍可使用"); updateAccount(); return;
     }
@@ -336,14 +361,21 @@ void Dock::processScan()
     const int chosen = chooseCandidate(eligible, processes.foreground, config.multiGame);
     if (chosen >= 0) suggestionChoice->setCurrentIndex(chosen);
     else { suggestionChoice->setCurrentIndex(suggestionChoice->findData(previous)); }
-    suggestionLabel->setText(!processes.available ? "無法讀取程序" : eligible.isEmpty() ? "沒有可用建議（未知遊戲不自動更新）" : "來源：本機程序＋自訂映射規則");
+    suggestionLabel->setText(!processes.available ? "無法讀取程序" : eligible.isEmpty() ? "未辨識到支援的遊戲；其他遊戲請搜尋分類並建立程序規則" : "來源：本機遊戲辨識／自訂映射規則");
     if (config.developerMode) suggestionLabel->setText("開發者模式 · 本機預演，不更新 Twitch\n" + suggestionLabel->text());
-    if (chosen < 0 || !config.suggestionsEnabled(streaming)) { stableKey.clear(); updateAccount(); return; }
+    if (chosen < 0 || !config.suggestionsEnabled(streaming)) { stableKey.clear(); notificationKey.clear(); if (suggestionPrompt) suggestionPrompt->close(); updateAccount(); return; }
     const auto &c = eligible[chosen]; const QString key = c.executable + "/" + c.id;
     const auto now = QDateTime::currentSecsSinceEpoch();
     if (stableKey != key) {
+        if (suggestionPrompt) suggestionPrompt->close(); notificationKey.clear();
         stableKey = key; stableSince = now;
         if (config.notifications) addActivity("分類建議：" + c.name + "（" + c.executable + "）");
+    }
+    if (c.id == client.current().id) { if (suggestionPrompt) suggestionPrompt->close(); notificationKey.clear(); }
+    const auto notice = key + "/" + client.current().id;
+    if (config.notifications && (config.developerMode || client.connected()) && c.id != client.current().id &&
+        now - stableSince >= 3 && notificationKey != notice) {
+        notificationKey = notice; notifySuggestion(c);
     }
     // Require a stable candidate and one automatic attempt per candidate transition.
     if (config.developerMode) {
@@ -387,7 +419,7 @@ void Dock::document(const QString &kind)
     if (kind == "服務條款") text->setPlainText("服務條款：待發布測試草稿\n版本：" + DocumentVersion +
         "\n\n本軟體目前為本機測試版本，正式服務條款尚未發布。\n功能用於讀取與修改你授權的 Twitch 頻道分類。自動更新必須由你在設定中啟用。\n分類更新依賴 Twitch API 與網路，請以讀回確認的狀態為準。\n本草稿僅供測試流程辨識，不表示正式法律文件已完成。");
     else text->setPlainText("隱私權政策：待發布測試草稿\n版本：" + DocumentVersion +
-        "\n\n本外掛會讀取本機程序檔名與前景程序，以比對你設定的遊戲映射；不讀取遊戲記憶體、不擷取畫面。\n程序清單只在本機處理，不上傳至 Twitch。搜尋文字、分類 ID 與 OAuth 必要資料送至 Twitch；分類圖片由 Twitch CDN 下載。\nToken 存於 Windows 認證管理員；偏好、映射、文件版本與 UTC 同意時間存於 OBS 外掛設定目錄。\n活動紀錄只留於本次工作階段，沒有遙測或雲端後端。\n你可登出、撤銷授權或清除本機資料。正式資料控制者及聯絡資訊尚待提供，因此本文件不是正式政策。");
+        "\n\n本外掛會讀取本機程序檔名與前景程序，以比對遊戲映射；Minecraft 辨識另外在本機比對 Java／Minecraft 程序的視窗標題，不儲存或上傳標題。不讀取遊戲記憶體、不擷取畫面。\n程序清單只在本機處理，不上傳至 Twitch。搜尋文字、分類 ID 與 OAuth 必要資料送至 Twitch；分類圖片由 Twitch CDN 下載。\nToken 存於 Windows 認證管理員；偏好、映射、文件版本與 UTC 同意時間存於 OBS 外掛設定目錄。\n活動紀錄只留於本次工作階段，沒有遙測或雲端後端。\n你可登出、撤銷授權或清除本機資料。正式資料控制者及聯絡資訊尚待提供，因此本文件不是正式政策。");
     layout->addWidget(text); auto *close = new QDialogButtonBox(QDialogButtonBox::Close); layout->addWidget(close); connect(close, &QDialogButtonBox::rejected, &dialog, &QDialog::reject); dialog.exec();
 }
 void Dock::login()
@@ -461,7 +493,8 @@ void Dock::settingsDialog()
         config.fontFamily = fontBox->currentFont().family(); config.fontSize = fontSize->value(); config.animations = animationBox->isChecked();
         config.multiGame = multi->currentIndex(); config.notifications = notifications->isChecked(); config.liveOnly = live->isChecked(); config.paused = pause->isChecked();
         config.developerMode = developerMode->isChecked();
-        stableKey.clear(); autoAttemptKey.clear(); lastAuto = 0; save(); theme(); updateAccount(); scan(); dialog.accept();
+        stableKey.clear(); notificationKey.clear(); if (suggestionPrompt) suggestionPrompt->close();
+        autoAttemptKey.clear(); lastAuto = 0; save(); theme(); updateAccount(); scan(); dialog.accept();
     });
     dialog.exec();
 }
