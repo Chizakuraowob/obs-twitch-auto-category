@@ -6,6 +6,8 @@
 #include <QTemporaryDir>
 #include <QFile>
 #include <QJsonArray>
+#include <QJsonDocument>
+#include <QDir>
 #include <QThread>
 #include <cstdio>
 #include <cstring>
@@ -74,7 +76,8 @@ int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
     if (app.arguments().contains("--detect-games")) {
-        const auto found = candidates(scanProcesses(), {});
+        const auto processes = scanProcesses(); const auto found = candidates(processes, {});
+        std::printf("Local library records: %d; running library games: %lld\n", processes.libraryCount, static_cast<long long>(processes.localGames.size()));
         for (const auto &game : found) std::printf("Detected: %s -> %s (%s)\n", game.executable.toUtf8().constData(), game.name.toUtf8().constData(), game.id.toUtf8().constData());
         return found.isEmpty() ? 1 : 0;
     }
@@ -117,6 +120,38 @@ int main(int argc, char **argv)
         auto old = s.json(); old.remove("wizardRevision"); old["fontSize"] = 999;
         loaded = Settings::fromJson(old); CHECK(!loaded.wizardDone); CHECK(loaded.fontSize == 22);
         old["fontSize"] = -1; CHECK(Settings::fromJson(old).fontSize == 12);
+    });
+    run("local Steam and Epic manifests, path boundaries and library cache", [] {
+        QTemporaryDir temp; CHECK(temp.isValid()); const auto root = temp.path();
+        auto write = [](const QString &path, const QByteArray &data) { QDir().mkpath(QFileInfo(path).absolutePath()); QFile f(path); CHECK(f.open(QIODevice::WriteOnly)); CHECK(f.write(data) == data.size()); };
+        write(root + "/steamapps/common/Game/bin/game.exe", "test");
+        write(root + "/steamapps/common/Game2/game.exe", "test");
+        write(root + "/steamapps/common/Game/crashreporter.exe", "test");
+        write(root + "/steamapps/appmanifest_42.acf", "\"AppState\" { \"appid\" \"42\" \"name\" \"Test Game\" \"installdir\" \"Game\" }");
+        write(root + "/steamapps/appmanifest_43.acf", "\"appid\" \"43\" \"name\" \"Escape\" \"installdir\" \"../escape\"");
+        auto games = readSteamLibrary(root); CHECK(games.size() == 1); CHECK(games[0].key == "steam:42");
+        CHECK(matchInstalledGame(root + "/steamapps/common/Game/bin/game.exe", games).key == "steam:42");
+        CHECK(matchInstalledGame(root + "/steamapps/common/Game2/game.exe", games).key.isEmpty());
+        CHECK(matchInstalledGame(root + "/steamapps/common/Game/crashreporter.exe", games).key.isEmpty());
+        QJsonObject epic{{"AppName", "abc123"}, {"DisplayName", "Test Game"}, {"InstallLocation", root + "/steamapps/common/Game"}};
+        write(root + "/epic/test.item", QJsonDocument(epic).toJson()); write(root + "/epic/bad.item", "{broken");
+        CHECK(readEpicLibrary(root + "/epic").size() == 1);
+        Settings s; s.categoryCache.insert("steam:42", {"27471", "Minecraft"}); s.allowCategoryLookup = true;
+        const auto loaded = Settings::fromJson(s.json()); CHECK(loaded.categoryCache.value("steam:42").id == "27471"); CHECK(loaded.allowCategoryLookup);
+        CHECK(!Settings{}.allowCategoryLookup); s.autoDetect = false; s.developerMode = true; CHECK(!s.suggestionsEnabled(true));
+        CHECK(!validLibraryKey("steam:../../private")); CHECK(!validLibraryKey("file:C:/private"));
+        Processes p{{"game.exe"}, "game.exe", true, {{"game.exe", "1", "A", 0}, {"game.exe", "2", "B", 0}}}; CHECK(candidates(p, {}).isEmpty());
+    });
+    run("name lookup is isolated, exact and does not update the channel", [] {
+        Transport net; authFixtures(net); Client client(nullptr, &net, false); authenticate(client, net);
+        Category found; int completed = 0; QObject::connect(&client, &Client::categoryResolved, &client, [&](const QString &, const Category &c) { found = c; ++completed; });
+        net.fixtures.enqueue({200, R"({"data":[{"id":"42","name":"Test Game"}]})"});
+        const auto count = net.urls.size(); client.resolveCategory("steam:42", "Test Game"); waitFor([&] { return completed == 1; });
+        CHECK(found.id == "42"); CHECK(net.urls.size() == count + 1); CHECK(net.urls.last().path() == "/helix/games"); CHECK(net.bodies.last().isEmpty());
+        net.fixtures.enqueue({200, R"({"data":[{"id":"43","name":"Different"}]})"});
+        client.resolveCategory("steam:42", "Test Game"); waitFor([&] { return completed == 2; }); CHECK(found.id.isEmpty());
+        net.fixtures.enqueue({200, R"({"data":[{"id":"42","name":"Test Game"},{"id":"43","name":"Test Game"}]})"});
+        client.resolveCategory("steam:42", "Test Game"); waitFor([&] { return completed == 3; }); CHECK(found.id.isEmpty()); CHECK(!net.unexpected);
     });
     run("corrupt settings preserve original file", [] {
         QTemporaryDir temp; const auto path = temp.filePath("settings.json"); QFile file(path); CHECK(file.open(QIODevice::WriteOnly)); file.write("{broken"); file.close();

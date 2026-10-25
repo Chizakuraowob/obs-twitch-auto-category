@@ -53,6 +53,12 @@ private:
     QLineEdit *searchInput;
     QListWidget *searchList, *activityList;
     QComboBox *suggestionChoice, *favoriteChoice;
+    QComboBox *localGameChoice;
+    QPushButton *linkLocalGame;
+    QVector<RunningGame> localGames;
+    QSet<QString> lookupAttempted;
+    bool lookupPending = false;
+    int libraryCount = 0;
     QPushButton *favoriteAdd, *favoriteApply, *favoriteRemove;
     QPushButton *connectButton, *searchButton, *applyButton, *moreButton, *suggestionApply, *resumeButton;
     QPushButton *activityToggle, *mappingButton, *ignoreButton;

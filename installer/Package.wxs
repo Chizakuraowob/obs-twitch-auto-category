@@ -42,6 +42,9 @@
           <Directory Id="INSTALLFOLDER" Name="twitch-category-assistant">
             <Component Id="LicenseFile" Guid="*"><File Source="$(var.ProjectRoot)\LICENSE" KeyPath="yes" /></Component>
             <Component Id="ReadmeFile" Guid="*"><File Source="$(var.ProjectRoot)\github_README.md" KeyPath="yes" /></Component>
+            <Directory Id="PluginDocs" Name="docs">
+              <Component Id="DataProcessingDoc" Guid="*"><File Source="$(var.ProjectRoot)\docs\data-processing.md" KeyPath="yes" /></Component>
+            </Directory>
             <Directory Id="PluginBin" Name="bin"><Directory Id="PluginBin64" Name="64bit">
               <Component Id="PluginDll" Guid="*"><File Source="$(var.Payload)\bin\64bit\twitch-category-assistant.dll" KeyPath="yes" /></Component>
             </Directory></Directory>
@@ -64,6 +67,7 @@
     <Feature Id="PluginFeature" Title="OBS Twitch 分類助手" Level="1">
       <ComponentRef Id="PluginDll" /><ComponentRef Id="ChineseLocale" /><ComponentRef Id="EnglishLocale" />
       <ComponentRef Id="LicenseFile" /><ComponentRef Id="ReadmeFile" />
+      <ComponentRef Id="DataProcessingDoc" />
       <ComponentRef Id="SchannelTls" /><ComponentRef Id="QtTlsNotice" /><ComponentRef Id="QtTlsLicense" />
     </Feature>
     <ui:WixUI Id="WixUI_Minimal" />

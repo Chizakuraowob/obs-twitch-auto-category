@@ -93,6 +93,9 @@ static QString themeSheet(const Settings &config)
         "QSpinBox::up-arrow {image:url(:/tca/up.svg);width:10px;height:10px;} QSpinBox::down-arrow {image:url(:/tca/down.svg);width:10px;height:10px;}"
         "QPushButton:disabled {color:#81858d;} QPushButton[primary=true] {background:#7565DF;color:white;}"
         "QPushButton[primary=true]:disabled {background:%3;color:#81858d;}"
+        "QPushButton[secondary=true] {background:#EAE5FF;color:#443287;border-color:#B8A9EE;}"
+        "QPushButton[danger=true] {background:%3;color:#C33D50;border-color:#C87580;}"
+        "QPushButton[secondary=true]:disabled,QPushButton[danger=true]:disabled {background:%3;color:%8;border-color:%4;}"
         "QPushButton[link=true] {color:%1;text-align:left;padding:7px 10px;}"
         "QListWidget,QTableWidget,QTextBrowser {background:%3;border:1px solid %4;border-radius:8px;}"
         "QListWidget {color:%1;selection-color:white;selection-background-color:#6554CB;}"
@@ -101,6 +104,9 @@ static QString themeSheet(const Settings &config)
         "QListWidget::item:selected,QListWidget::item:selected:!active {background:#6554CB;color:white;}"
         "QListWidget::item:disabled {color:%8;background:%3;}"
         "QCheckBox {background:transparent;spacing:8px;padding:5px;} QToolTip {background:%3;color:%1;border:1px solid %4;}"
+        "QCheckBox::indicator {width:16px;height:16px;border:1px solid #81858D;border-radius:4px;background:%3;image:none;}"
+        "QCheckBox::indicator:checked {background:#7565DF;border-color:#7565DF;image:url(:/tca/check.svg);}"
+        "QCheckBox::indicator:disabled {border-color:%4;background:%2;}"
         "QScrollBar:vertical {background:transparent;width:8px;margin:0;} QScrollBar::handle:vertical {background:%4;border-radius:4px;min-height:24px;}"
         "QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical {height:0;} QScrollBar::add-page:vertical,QScrollBar::sub-page:vertical {background:transparent;}")
         .arg(text, bg, panel, edge).arg(config.fontSize).arg(family).arg(config.fontSize + 3).arg(dark ? "#A9AFBB" : "#606978");
@@ -132,7 +138,9 @@ Dock::Dock(QString settingsDirectory, QWidget *parent)
     favoriteChoice = new QComboBox; favoriteChoice->setObjectName("favoriteChoice"); favoriteChoice->setAccessibleName("收藏的 Twitch 分類"); favorites->addWidget(favoriteChoice);
     favoriteChoice->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon); favoriteChoice->setMinimumContentsLength(12);
     favoriteApply = button("套用收藏分類"); favoriteApply->setObjectName("favoriteApply"); favorites->addWidget(favoriteApply);
+    favoriteApply->setProperty("primary", true);
     favoriteRemove = button("移除收藏"); favoriteRemove->setObjectName("favoriteRemove"); favorites->addWidget(favoriteRemove);
+    favoriteRemove->setProperty("danger", true);
     connect(favoriteChoice, &QComboBox::currentIndexChanged, this, [this] { updateAccount(); });
     connect(favoriteApply, &QPushButton::clicked, this, [this] {
         const int row = favoriteChoice->currentIndex();
@@ -151,6 +159,7 @@ Dock::Dock(QString settingsDirectory, QWidget *parent)
     searchList = new QListWidget; searchList->setObjectName("searchResults"); searchList->setWordWrap(true); searchList->setFixedHeight(90); searchList->setIconSize(QSize(42, 56)); search->addWidget(searchList);
     applyButton = button("套用選取分類"); applyButton->setProperty("primary", true); search->addWidget(applyButton);
     favoriteAdd = button("加入我的最愛"); favoriteAdd->setObjectName("favoriteAdd"); search->addWidget(favoriteAdd);
+    favoriteAdd->setProperty("secondary", true);
     connect(favoriteAdd, &QPushButton::clicked, this, [this] {
         const int row = searchList->currentRow(); if (row < 0 || row >= searchCategories.size()) return;
         const auto c = searchCategories[row];
@@ -161,6 +170,15 @@ Dock::Dock(QString settingsDirectory, QWidget *parent)
     });
     moreButton = button("載入更多"); moreButton->hide(); search->addWidget(moreButton);
     mappingButton = button("＋ 建立這款遊戲的規則"); mappingButton->setProperty("link", true); search->addWidget(mappingButton);
+    localGameChoice = new QComboBox; localGameChoice->setAccessibleName("偵測到的本機遊戲"); localGameChoice->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon); localGameChoice->setMinimumContentsLength(12); search->addWidget(localGameChoice);
+    linkLocalGame = button("將選取分類連結到這款本機遊戲"); linkLocalGame->setProperty("secondary", true); search->addWidget(linkLocalGame);
+    connect(linkLocalGame, &QPushButton::clicked, this, [this] {
+        const int row = searchList->currentRow(); const auto key = localGameChoice->currentData().toString();
+        if (row < 0 || row >= searchCategories.size() || !validLibraryKey(key)) return;
+        if (!config.categoryCache.contains(key) && config.categoryCache.size() >= 1000) { setStatus("分類對應快取已滿，請先在設定清除快取"); return; }
+        const auto category = searchCategories[row]; config.categoryCache.insert(key, {category.id, category.name}); save();
+        stableKey.clear(); autoAttemptKey.clear(); setStatus("已在本機連結：" + localGameChoice->currentText() + " → " + category.name); scan();
+    });
     searchTimer.setSingleShot(true); searchTimer.setInterval(400);
     auto doSearch = [this] {
         searchQuery = searchInput->text().trimmed(); searchCategories.clear(); searchList->clear(); cursor.clear(); moreButton->hide();
@@ -184,6 +202,7 @@ Dock::Dock(QString settingsDirectory, QWidget *parent)
     auto *suggestion = card(layout, "智慧分類建議"); suggestionLabel = label("尚無候選；請先搜尋分類並新增遊戲規則"); suggestion->addWidget(suggestionLabel);
     suggestionChoice = new QComboBox; suggestion->addWidget(suggestionChoice);
     suggestionApply = button("套用建議"); suggestion->addWidget(suggestionApply); connect(suggestionApply, &QPushButton::clicked, this, &Dock::applySuggestion);
+    suggestionApply->setProperty("primary", true);
     ignoreButton = button("略過這次建議"); ignoreButton->setProperty("link", true); suggestion->addWidget(ignoreButton);
     connect(ignoreButton, &QPushButton::clicked, this, [this] {
         const auto id = suggestionChoice->currentData().toString(); if (!id.isEmpty()) ignored.insert(id); processScan();
@@ -198,7 +217,15 @@ Dock::Dock(QString settingsDirectory, QWidget *parent)
         activityToggle->setText(QString("最近活動 · %1  %2").arg(activityList->count()).arg(expanded ? "▾" : "▸"));
         if (expanded) animate(activityList);
     });
-    auto *setup = button("設定精靈"); setup->setProperty("link", true); layout->addWidget(setup); connect(setup, &QPushButton::clicked, this, &Dock::wizard); layout->addStretch();
+    layout->addStretch();
+    connect(&client, &Client::categoryResolved, this, [this](const QString &key, const Category &category) {
+        lookupPending = false;
+        if (!config.allowCategoryLookup || !config.autoDetect || !config.detectLibraries || !lookupAttempted.contains(key) || stopped) return;
+        if (category.id.isEmpty()) { addActivity("找不到唯一同名 Twitch 分類；請搜尋後連結本機遊戲"); return; }
+        if (!config.categoryCache.contains(key) && config.categoryCache.size() < 1000) { config.categoryCache.insert(key, {category.id, category.name}); save(); }
+        scan();
+    });
+    connect(&client, &Client::accountChanged, this, [this] { lookupPending = false; lookupAttempted.clear(); });
     connect(&client, &Client::accountChanged, this, &Dock::updateAccount);
     connect(&client, &Client::status, this, [this](const QString &text) { setStatus(text); updateAccount(); });
     connect(&client, &Client::activity, this, &Dock::addActivity);
@@ -280,6 +307,9 @@ void Dock::updateAccount()
     searchList->setVisible(client.connected() && !searchCategories.isEmpty());
     applyButton->setVisible(!searchCategories.isEmpty());
     mappingButton->setVisible(searchList->currentRow() >= 0);
+    localGameChoice->setVisible(!localGames.isEmpty());
+    linkLocalGame->setVisible(!localGames.isEmpty());
+    linkLocalGame->setEnabled(selected >= 0 && selected < searchCategories.size() && localGameChoice->currentIndex() >= 0);
     const bool hasSuggestion = suggestionChoice->count() > 0;
     suggestionChoice->setVisible(hasSuggestion); suggestionApply->setVisible(hasSuggestion); ignoreButton->setVisible(hasSuggestion);
     if (!client.connected()) { searchCategories.clear(); searchList->clear(); searchList->setFixedHeight(90); moreButton->hide(); applyButton->hide(); mappingButton->hide(); }
@@ -340,16 +370,28 @@ void Dock::scan()
     if (!config.suggestionsEnabled(streaming)) {
         if (suggestionPrompt) suggestionPrompt->close(); notificationKey.clear();
         suggestionChoice->clear(); suggestionApply->setEnabled(false); stableKey.clear();
-        suggestionLabel->setText(config.paused ? "已暫停分類建議" : "尚未開始 OBS 串流；手動搜尋仍可使用"); updateAccount(); return;
+        localGames.clear(); localGameChoice->clear();
+        suggestionLabel->setText(!config.autoDetect ? "自動偵測已關閉" : config.paused ? "已暫停分類建議" : "尚未開始 OBS 串流；手動搜尋仍可使用"); updateAccount(); return;
     }
     if (watcher.isRunning()) return;
-    watcher.setFuture(QtConcurrent::run(scanProcesses));
+    watcher.setFuture(QtConcurrent::run([libraries = config.detectLibraries] { return scanProcesses(libraries); }));
 }
 void Dock::processScan()
 {
     if (stopped || !watcher.isFinished() || !watcher.future().isValid()) return;
     if (!config.suggestionsEnabled(streaming)) { scan(); return; }
-    const auto processes = watcher.result(); detected = candidates(processes, config.rules);
+    auto processes = watcher.result(); libraryCount = config.detectLibraries ? processes.libraryCount : 0; localGames = config.detectLibraries ? processes.localGames : QVector<RunningGame>{};
+    { const QSignalBlocker blocker(localGameChoice); const auto previousGame = localGameChoice->currentData(); localGameChoice->clear();
+      for (const auto &game : localGames) localGameChoice->addItem(game.name, game.key);
+      const int row = localGameChoice->findData(previousGame); if (row >= 0) localGameChoice->setCurrentIndex(row); }
+    for (const auto &game : localGames) {
+        if (config.categoryCache.contains(game.key)) {
+            const auto category = config.categoryCache.value(game.key); processes.recognizedGames.append({game.executable, category.id, category.name, 0});
+        } else if (config.allowCategoryLookup && config.consented() && client.connected() && !lookupPending && !lookupAttempted.contains(game.key) && config.categoryCache.size() < 1000) {
+            lookupPending = true; lookupAttempted.insert(game.key); client.resolveCategory(game.key, game.name);
+        }
+    }
+    detected = candidates(processes, config.rules);
     QSet<QString> running;
     for (const auto &c : detected) running.insert(c.id);
     ignored.intersect(running);
@@ -361,7 +403,7 @@ void Dock::processScan()
     const int chosen = chooseCandidate(eligible, processes.foreground, config.multiGame);
     if (chosen >= 0) suggestionChoice->setCurrentIndex(chosen);
     else { suggestionChoice->setCurrentIndex(suggestionChoice->findData(previous)); }
-    suggestionLabel->setText(!processes.available ? "無法讀取程序" : eligible.isEmpty() ? "未辨識到支援的遊戲；其他遊戲請搜尋分類並建立程序規則" : "來源：本機遊戲辨識／自訂映射規則");
+    suggestionLabel->setText(!processes.available ? "無法讀取程序" : eligible.isEmpty() ? (localGames.isEmpty() ? "尚未偵測到遊戲視窗；可搜尋分類建立程序規則" : "已偵測到本機遊戲，尚未對應 Twitch 分類。搜尋後連結，或在設定允許名稱查詢。") : "來源：本機遊戲庫／內建辨識／自訂映射規則");
     if (config.developerMode) suggestionLabel->setText("開發者模式 · 本機預演，不更新 Twitch\n" + suggestionLabel->text());
     if (chosen < 0 || !config.suggestionsEnabled(streaming)) { stableKey.clear(); notificationKey.clear(); if (suggestionPrompt) suggestionPrompt->close(); updateAccount(); return; }
     const auto &c = eligible[chosen]; const QString key = c.executable + "/" + c.id;
@@ -373,7 +415,7 @@ void Dock::processScan()
     }
     if (c.id == client.current().id) { if (suggestionPrompt) suggestionPrompt->close(); notificationKey.clear(); }
     const auto notice = key + "/" + client.current().id;
-    if (config.notifications && (config.developerMode || client.connected()) && c.id != client.current().id &&
+    if (config.notifications && (!config.automatic || config.developerMode || manualOverride) && (config.developerMode || client.connected()) && c.id != client.current().id &&
         now - stableSince >= 3 && notificationKey != notice) {
         notificationKey = notice; notifySuggestion(c);
     }
@@ -419,7 +461,7 @@ void Dock::document(const QString &kind)
     if (kind == "服務條款") text->setPlainText("服務條款：待發布測試草稿\n版本：" + DocumentVersion +
         "\n\n本軟體目前為本機測試版本，正式服務條款尚未發布。\n功能用於讀取與修改你授權的 Twitch 頻道分類。自動更新必須由你在設定中啟用。\n分類更新依賴 Twitch API 與網路，請以讀回確認的狀態為準。\n本草稿僅供測試流程辨識，不表示正式法律文件已完成。");
     else text->setPlainText("隱私權政策：待發布測試草稿\n版本：" + DocumentVersion +
-        "\n\n本外掛會讀取本機程序檔名與前景程序，以比對遊戲映射；Minecraft 辨識另外在本機比對 Java／Minecraft 程序的視窗標題，不儲存或上傳標題。不讀取遊戲記憶體、不擷取畫面。\n程序清單只在本機處理，不上傳至 Twitch。搜尋文字、分類 ID 與 OAuth 必要資料送至 Twitch；分類圖片由 Twitch CDN 下載。\nToken 存於 Windows 認證管理員；偏好、映射、文件版本與 UTC 同意時間存於 OBS 外掛設定目錄。\n活動紀錄只留於本次工作階段，沒有遙測或雲端後端。\n你可登出、撤銷授權或清除本機資料。正式資料控制者及聯絡資訊尚待提供，因此本文件不是正式政策。");
+        "\n\n本外掛會讀取本機程序檔名與前景程序，以比對遊戲映射；Minecraft 辨識另外在本機比對 Java／Minecraft 程序的視窗標題，不儲存或上傳標題。不讀取遊戲記憶體、不擷取畫面。\n本機遊戲庫辨識會讀取 Steam／Epic 安裝紀錄、GOG 登錄資訊與可見視窗所屬程序路徑，只在本機比對。程序清單、路徑、視窗標題及完整遊戲庫不會上傳。\n自動遊戲名稱查詢預設關閉；啟用後將偵測到的遊戲名稱送到 Twitch 官方 API。手動搜尋文字、分類 ID 與 OAuth 必要資料亦送至 Twitch；分類圖片由 Twitch CDN 下載。Twitch 可接收連線 IP 與請求時間。\nToken 存於 Windows 認證管理員；偏好、收藏、平台遊戲 ID 對 Twitch 分類的快取、映射、文件版本與 UTC 同意時間存於 OBS 外掛設定目錄。快取可在設定清除；關閉名稱查詢會停止新增查詢，但不會撤回已送出的請求。\n活動紀錄只留於本次工作階段，沒有遙測或雲端後端。\n你可登出、撤銷授權或清除本機資料。正式資料控制者及聯絡資訊尚待提供，因此本文件不是正式政策。");
     layout->addWidget(text); auto *close = new QDialogButtonBox(QDialogButtonBox::Close); layout->addWidget(close); connect(close, &QDialogButtonBox::rejected, &dialog, &QDialog::reject); dialog.exec();
 }
 void Dock::login()
@@ -448,20 +490,33 @@ void Dock::login()
 }
 void Dock::settingsDialog()
 {
+    bool openWizard = false;
     QDialog dialog(this); dialog.setWindowTitle("設定"); dialog.setStyleSheet(themeSheet(config)); dialog.resize(500, 600);
     auto *outer = new QVBoxLayout(&dialog); auto *scroll = new QScrollArea; scroll->setWidgetResizable(true); outer->addWidget(scroll);
     auto *body = new QWidget; auto *layout = new QVBoxLayout(body); scroll->setWidget(body);
+    auto *setupCard = card(layout, "開始與設定精靈");
+    setupCard->addWidget(label("重新查看功能說明、登入 Twitch 與設定更新偏好。"));
+    auto *setup = button("開啟設定精靈"); setup->setObjectName("openSetupWizard"); setup->setProperty("secondary", true); setupCard->addWidget(setup);
+    connect(setup, &QPushButton::clicked, &dialog, [&] { openWizard = true; dialog.reject(); });
+    auto *detection = card(layout, "自動偵測與分類更新詢問");
+    auto *autoDetect = new QCheckBox("啟用遊戲自動偵測"); autoDetect->setChecked(config.autoDetect); detection->addWidget(autoDetect);
+    auto *libraries = new QCheckBox("讀取本機 Steam／Epic／GOG 遊戲庫"); libraries->setChecked(config.detectLibraries); detection->addWidget(libraries);
+    detection->addWidget(label(QString("上次掃描：%1 筆安裝紀錄，%2 筆分類對應。遊戲庫約每分鐘重新讀取，程序約每 3 秒偵測。").arg(libraryCount).arg(config.categoryCache.size())));
+    auto *lookup = new QCheckBox("向 Twitch 查詢遊戲名稱（聯網）"); lookup->setChecked(config.allowCategoryLookup); detection->addWidget(lookup);
+    detection->addWidget(label("預設不傳送偵測資料。啟用後只向 Twitch 傳送正在執行的遊戲名稱與 OAuth 必要資訊；不傳送程序／路徑／完整遊戲庫。僅採用唯一同名分類，結果保存在本機。"));
+    auto *clearCache = button("清除分類對應快取"); clearCache->setProperty("danger", true); detection->addWidget(clearCache);
+    connect(clearCache, &QPushButton::clicked, &dialog, [this] { config.categoryCache.clear(); lookupAttempted.clear(); save(); setStatus("已清除本機分類對應；保留收藏與自訂程序規則"); });
     auto *appearance = card(layout, "外觀"); auto *themeBox = new QComboBox; themeBox->addItems({"跟隨系統", "淺色", "深色"}); themeBox->setCurrentIndex(config.theme); appearance->addWidget(themeBox);
     auto *fontBox = new QFontComboBox; fontBox->setCurrentFont(QFont(config.fontFamily)); fontBox->setAccessibleName("介面字型"); appearance->addWidget(label("字型")); appearance->addWidget(fontBox);
     auto *fontSize = new QSpinBox; fontSize->setRange(12, 22); fontSize->setSuffix(" px"); fontSize->setValue(config.fontSize); fontSize->setAccessibleName("字體大小"); appearance->addWidget(label("字體大小")); appearance->addWidget(fontSize);
     auto *animationBox = new QCheckBox("輕量淡入動畫"); animationBox->setChecked(config.animations); appearance->addWidget(animationBox);
     auto preview = [&] { auto values = config; values.theme = themeBox->currentIndex(); values.fontFamily = fontBox->currentFont().family(); values.fontSize = fontSize->value(); dialog.setStyleSheet(themeSheet(values)); };
     connect(themeBox, &QComboBox::currentIndexChanged, &dialog, preview); connect(fontBox, &QFontComboBox::currentFontChanged, &dialog, preview); connect(fontSize, &QSpinBox::valueChanged, &dialog, preview);
-    auto *policy = card(layout, "分類更新策略"); auto *update = new QComboBox; update->addItems({"每次詢問（建議）", "符合規則時自動更新"}); update->setCurrentIndex(config.automatic ? 1 : 0); policy->addWidget(update);
+    auto *policy = detection; auto *update = new QComboBox; update->addItems({"每次詢問是否更新（建議）", "符合規則時自動更新"}); update->setCurrentIndex(config.automatic ? 1 : 0); policy->addWidget(update);
     policy->addWidget(label("自動模式只處理明確映射、穩定候選；手動套用後暫停自動覆寫。"));
     auto *multi = new QComboBox; multi->addItems({"前景遊戲優先", "每次由我選擇", "自訂優先順序（數字較大優先）"}); multi->setCurrentIndex(config.multiGame); policy->addWidget(multi);
     auto *rules = button("管理遊戲映射與優先順序"); policy->addWidget(rules); connect(rules, &QPushButton::clicked, this, &Dock::rulesDialog);
-    auto *notify = card(layout, "通知"); auto *notifications = new QCheckBox("OBS Dock 內通知"); notifications->setChecked(config.notifications); notify->addWidget(notifications);
+    auto *notify = detection; auto *notifications = new QCheckBox("分類不同時顯示更新詢問／建議視窗"); notifications->setChecked(config.notifications); notify->addWidget(notifications);
     auto *windows = new QCheckBox("Windows 通知（此版本不支援）"); windows->setEnabled(false); notify->addWidget(windows);
     auto *live = new QCheckBox("僅在本機 OBS 串流期間顯示自動建議"); live->setChecked(config.liveOnly); notify->addWidget(live);
     auto *advanced = card(layout, "進階與帳號"); auto *pause = new QCheckBox("暫停自動分類建議"); pause->setChecked(config.paused); advanced->addWidget(pause);
@@ -476,7 +531,7 @@ void Dock::settingsDialog()
         connect(developerToggle, &QPushButton::toggled, developer, &QWidget::setVisible);
     }
     auto *logout = button("登出並嘗試撤銷授權"); advanced->addWidget(logout); connect(logout, &QPushButton::clicked, &client, &Client::logout);
-    auto *clear = button("清除本機資料…"); advanced->addWidget(clear);
+    auto *clear = button("清除本機資料…"); clear->setProperty("danger", true); advanced->addWidget(clear);
     connect(clear, &QPushButton::clicked, &dialog, [&] {
         if (QMessageBox::question(&dialog, "清除本機資料", "刪除偏好、遊戲映射、同意紀錄、本次活動與目前帳號憑證，並嘗試撤銷 Twitch 授權？", QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes) return;
         client.logout(); config = {}; ignored.clear(); detected.clear(); manualOverride = false; stableKey.clear(); autoAttemptKey.clear();
@@ -493,10 +548,12 @@ void Dock::settingsDialog()
         config.fontFamily = fontBox->currentFont().family(); config.fontSize = fontSize->value(); config.animations = animationBox->isChecked();
         config.multiGame = multi->currentIndex(); config.notifications = notifications->isChecked(); config.liveOnly = live->isChecked(); config.paused = pause->isChecked();
         config.developerMode = developerMode->isChecked();
+        config.autoDetect = autoDetect->isChecked(); config.detectLibraries = libraries->isChecked(); config.allowCategoryLookup = lookup->isChecked(); lookupAttempted.clear();
         stableKey.clear(); notificationKey.clear(); if (suggestionPrompt) suggestionPrompt->close();
         autoAttemptKey.clear(); lastAuto = 0; save(); theme(); updateAccount(); scan(); dialog.accept();
     });
     dialog.exec();
+    if (openWizard) wizard();
 }
 void Dock::rulesDialog()
 {

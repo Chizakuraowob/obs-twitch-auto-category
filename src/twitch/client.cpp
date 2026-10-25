@@ -275,6 +275,16 @@ void Client::apply(const Category &category)
         }
     });
 }
+void Client::resolveCategory(const QString &key, const QString &name)
+{
+    if (!ready || !validLibraryKey(key) || name.trimmed().isEmpty() || name.size() > 256) { emit categoryResolved(key, {}); return; }
+    QUrl url("https://api.twitch.tv/helix/games"); QUrlQuery query; query.addQueryItem("name", name); url.setQuery(query);
+    request("GET", url, {}, true, [this, key, name](const Response &r) {
+        const auto data = r.object["data"].toArray(); Category category;
+        if (r.code != 200 || r.networkError || data.size() != 1 || !parseCategory(data.first().toObject(), category) || category.name.compare(name, Qt::CaseInsensitive) != 0) category = {};
+        emit categoryResolved(key, category);
+    });
+}
 void Client::confirm(Category target, quint64 operation, int attempt)
 {
     request("GET", channelUrl(), {}, true, [this, target, operation, attempt](const Response &r) {

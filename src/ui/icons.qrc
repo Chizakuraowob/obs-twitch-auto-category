@@ -1,1 +1,1 @@
-<RCC><qresource prefix="/tca"><file alias="down.svg">icons/down.svg</file><file alias="up.svg">icons/up.svg</file></qresource></RCC>
+<RCC><qresource prefix="/tca"><file alias="down.svg">icons/down.svg</file><file alias="up.svg">icons/up.svg</file><file alias="check.svg">icons/check.svg</file></qresource></RCC>

@@ -26,6 +26,7 @@ public:
     void shutdown();
     void search(const QString &query, const QString &cursor = {});
     void readCurrent();
+    void resolveCategory(const QString &key, const QString &name);
     void apply(const Category &category);
     bool connected() const { return ready; }
     bool busy() const { return updating; }
@@ -39,6 +40,7 @@ signals:
     void results(const QVector<tca::Category> &categories, const QString &cursor);
     void searchFinished();
     void currentChanged();
+    void categoryResolved(const QString &key, const tca::Category &category);
     void status(const QString &message);
     void activity(const QString &message);
 private:

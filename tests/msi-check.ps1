@@ -32,7 +32,8 @@ try {
     $sequence = @{}; foreach ($row in (Read-Table 'InstallExecuteSequence')) { $sequence[$row[0]] = [int]$row[2] }
     if ($sequence.Wix4CloseApplications_X64 -ge $sequence.ObsStillRunning -or $sequence.ObsStillRunning -ge $sequence.InstallFiles) { throw 'Process check must precede file installation.' }
     $files = @(Read-Table 'File')
-    if ($files.Count -ne 8 -or @($files | Where-Object { $_[2] -match 'Qt6|\.pdb$' }).Count) { throw 'Unexpected MSI payload; do not bundle OBS Qt runtime DLLs or PDBs.' }
+    if ($files.Count -ne 9 -or @($files | Where-Object { $_[2] -match 'Qt6|\.pdb$' }).Count) { throw 'Unexpected MSI payload; do not bundle OBS Qt runtime DLLs or PDBs.' }
+    if (@($files | Where-Object { $_[2] -match 'data-processing\.md$' }).Count -ne 1) { throw 'MSI is missing the data-processing disclosure.' }
     if (@($files | Where-Object { $_[2] -match 'qschannelbackend\.dll$' }).Count -ne 1) { throw 'MSI is missing the HTTPS TLS backend.' }
     # OpenPackage + AppSearch only reads installation discovery. Never execute InstallFiles/ExecuteAction here.
     $session = $installer.OpenPackage($resolved, 1)

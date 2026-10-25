@@ -10,6 +10,7 @@
 
 namespace tca {
 bool validCategoryId(const QString &id) { return QRegularExpression("^[0-9]{1,20}$").match(id).hasMatch(); }
+bool validLibraryKey(const QString &key) { return QRegularExpression("^(steam|epic|gog):[a-zA-Z0-9._-]{1,128}$").match(key).hasMatch(); }
 bool validExecutable(const QString &name)
 {
     return name.size() <= 260 && QRegularExpression("^[^/\\\\:*?\"<>|]+\\.exe$", QRegularExpression::CaseInsensitiveOption).match(name).hasMatch();
@@ -27,9 +28,11 @@ QJsonObject Settings::json() const
         list.append(QJsonObject{{"exe", r.executable}, {"id", r.categoryId}, {"name", r.categoryName}, {"priority", r.priority}});
     QJsonArray savedFavorites;
     for (const auto &f : favorites) savedFavorites.append(QJsonObject{{"id", f.id}, {"name", f.name}});
+    QJsonObject cache; for (auto it = categoryCache.begin(); it != categoryCache.end(); ++it) cache[it.key()] = QJsonObject{{"id", it->id}, {"name", it->name}};
     return {{"schema", 1}, {"clientId", clientId}, {"theme", theme}, {"fontFamily", fontFamily}, {"fontSize", fontSize}, {"animations", animations}, {"automatic", automatic},
         {"notifications", notifications}, {"liveOnly", liveOnly}, {"paused", paused}, {"multiGame", multiGame},
         {"developerMode", developerMode}, {"favorites", savedFavorites},
+        {"autoDetect", autoDetect}, {"detectLibraries", detectLibraries}, {"allowCategoryLookup", allowCategoryLookup}, {"categoryCache", cache},
         {"wizardDone", wizardDone}, {"wizardRevision", 2}, {"termsVersion", termsVersion}, {"privacyVersion", privacyVersion},
         {"termsUtc", termsUtc}, {"privacyUtc", privacyUtc}, {"rules", list}};
 }
@@ -46,6 +49,12 @@ Settings Settings::fromJson(const QJsonObject &o)
     s.automatic = o["automatic"].toBool(); s.notifications = o["notifications"].toBool(true);
     s.liveOnly = o["liveOnly"].toBool(true); s.paused = o["paused"].toBool();
     s.developerMode = o["developerMode"].toBool();
+    s.autoDetect = o["autoDetect"].toBool(true); s.detectLibraries = o["detectLibraries"].toBool(true); s.allowCategoryLookup = o["allowCategoryLookup"].toBool();
+    const auto cache = o["categoryCache"].toObject();
+    for (auto it = cache.begin(); it != cache.end() && s.categoryCache.size() < 1000; ++it) {
+        const auto value = it.value().toObject(); const auto id = value["id"].toString(), name = value["name"].toString().trimmed();
+        if (validLibraryKey(it.key()) && validCategoryId(id) && !name.isEmpty() && name.size() <= 256) s.categoryCache.insert(it.key(), {id, name});
+    }
     QSet<QString> favoriteIds;
     for (const auto &entry : o["favorites"].toArray()) {
         const auto f = entry.toObject();

@@ -40,12 +40,11 @@ int main(int argc, char **argv)
         if (!dock.grab().save(output + "/dock-dark.png")) result = 3;
         dock.resize(280, 700); app.processEvents();
         if (!dock.grab().save(output + "/dock-narrow.png")) result = 4;
-        QPushButton *settingsButton = nullptr, *wizardButton = nullptr;
+        QPushButton *settingsButton = nullptr;
         for (auto *button : dock.findChildren<QPushButton *>()) {
             if (button->text() == "設定") settingsButton = button;
-            if (button->text() == "設定精靈") wizardButton = button;
         }
-        if (!settingsButton || !wizardButton) { app.exit(5); return; }
+        if (!settingsButton || dock.findChild<QPushButton *>("openSetupWizard")) { app.exit(5); return; }
         QTimer::singleShot(100, &app, [&] {
             auto *dialog = qobject_cast<QDialog *>(app.activeModalWidget());
             if (!dialog || !dialog->grab().save(output + "/settings-dark.png")) result = 6;
@@ -58,7 +57,7 @@ int main(int argc, char **argv)
             }
         });
         settingsButton->click();
-        QTimer::singleShot(100, &app, [&] {
+        QTimer::singleShot(200, &app, [&] {
             auto *wizard = qobject_cast<QWizard *>(app.activeModalWidget());
             if (!wizard) { result = 7; return; }
             wizard->next(); wizard->next(); app.processEvents();
@@ -74,7 +73,13 @@ int main(int argc, char **argv)
             if (!wizard->grab().save(output + "/login-required.png")) result = 17;
             wizard->reject();
         });
-        wizardButton->click();
+        QTimer::singleShot(80, &app, [&] {
+            auto *dialog = qobject_cast<QDialog *>(app.activeModalWidget());
+            auto *setup = dialog ? dialog->findChild<QPushButton *>("openSetupWizard") : nullptr;
+            if (!setup) { result = 33; if (dialog) dialog->reject(); return; }
+            setup->click();
+        });
+        settingsButton->click();
         dock.resize(312, 442); app.processEvents();
         if (!dock.grab().save(output + "/dock-compact-large-font.png")) result = 18;
         dock.stop(); dock.hide();
