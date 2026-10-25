@@ -1,12 +1,22 @@
 #pragma once
 #include "settings/settings.hpp"
 #include <QStringList>
+#include <QSet>
 namespace tca {
 struct InstalledGame { QString key, name, directory; };
 struct RunningGame { QString key, name, executable; };
 struct WindowEvidence { QString executable, windowClass, title, pathHash, parentExecutable, suggestedName; bool foreground = false; };
 struct Processes { QStringList executables; QString foreground; bool available = false; QVector<Rule> recognizedGames; QVector<RunningGame> localGames; int libraryCount = 0; QVector<WindowEvidence> windows; };
 struct Candidate { QString executable, id, name; int priority = 0; };
+QString suggestionKey(const Candidate &candidate);
+struct SuggestionSession {
+    QSet<QString> handled, games;
+    QMap<QString, qint64> missingSince;
+    bool played = false, idleNotified = false, idleReady = false;
+    qint64 idleSince = -1;
+    void pause() { idleSince = -1; idleReady = false; }
+    void update(const Processes &processes, const QVector<Candidate> &detected, bool uncertain, qint64 now);
+};
 Processes scanProcesses(bool libraries = true, const QStringList &learnedExecutables = {}, bool inspectForeground = true);
 bool canLearnWindow(const QString &executable);
 QString windowKey(const WindowEvidence &window);

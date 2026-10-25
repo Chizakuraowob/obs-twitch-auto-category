@@ -15,6 +15,31 @@
 #include <windows.h>
 #include <tlhelp32.h>
 namespace tca {
+QString suggestionKey(const Candidate &candidate) { return candidate.executable.toLower() + "/" + candidate.id; }
+void SuggestionSession::update(const Processes &processes, const QVector<Candidate> &detected, bool uncertain, qint64 now)
+{
+    if (!processes.available) { pause(); return; }
+    for (const auto &candidate : detected) games.insert(candidate.executable.toLower());
+    bool running = false;
+    const auto tracked = games;
+    for (const auto &exe : tracked) {
+        if (processes.executables.contains(exe, Qt::CaseInsensitive)) { running = true; missingSince.remove(exe); }
+        else {
+            if (!missingSince.contains(exe)) missingSince.insert(exe, now);
+            // A missing window is not an exit; require a sustained absence from the process snapshot.
+            if (now - missingSince.value(exe) >= 60) {
+                games.remove(exe); missingSince.remove(exe);
+                for (auto it = handled.begin(); it != handled.end();) {
+                    if (it->startsWith(exe + "/")) it = handled.erase(it); else ++it;
+                }
+            }
+        }
+    }
+    if (!detected.isEmpty()) { played = true; idleNotified = false; }
+    if (!played || running || !detected.isEmpty() || !processes.localGames.isEmpty() || uncertain) { pause(); return; }
+    if (idleSince < 0) idleSince = now;
+    idleReady = now - idleSince >= 90;
+}
 static QByteArray boundedFile(const QString &path)
 {
     QFile file(path); if (!file.open(QIODevice::ReadOnly) || file.size() > 2 * 1024 * 1024) return {};

@@ -211,10 +211,12 @@ Dock::Dock(QString settingsDirectory, QWidget *parent)
     suggestionApply->setProperty("primary", true);
     ignoreButton = button("略過這次建議"); ignoreButton->setProperty("link", true); suggestion->addWidget(ignoreButton);
     connect(ignoreButton, &QPushButton::clicked, this, [this] {
-        const auto id = suggestionChoice->currentData().toString(); if (!id.isEmpty()) ignored.insert(id); processScan();
+        const auto id = suggestionChoice->currentData().toString(); if (!id.isEmpty()) ignored.insert(id);
+        for (const auto &candidate : detected) if (candidate.id == id) suggestionSession.handled.insert(suggestionKey(candidate));
+        if (suggestionPrompt) suggestionPrompt->close(); processScan();
     });
     resumeButton = button("恢復自動分類"); resumeButton->hide(); suggestion->addWidget(resumeButton);
-    connect(resumeButton, &QPushButton::clicked, this, [this] { manualOverride = false; autoAttemptKey.clear(); stableKey.clear(); resumeButton->hide(); });
+    connect(resumeButton, &QPushButton::clicked, this, [this] { manualOverride = false; suggestionSession.handled.clear(); autoAttemptKey.clear(); stableKey.clear(); resumeButton->hide(); });
     auto *statusCard = card(layout, "狀態"); statusLabel = label("連接 Twitch，開始管理分類"); statusLabel->setAccessibleName("分類更新狀態"); statusCard->addWidget(statusLabel);
     activityToggle = button("最近活動 · 0  ▸"); activityToggle->setProperty("link", true); activityToggle->setCheckable(true); layout->addWidget(activityToggle);
     activityList = new QListWidget; activityList->setMaximumHeight(140); activityList->setWordWrap(true); activityList->hide(); layout->addWidget(activityList);
@@ -344,28 +346,35 @@ void Dock::applySelected()
 void Dock::applySuggestion()
 {
     const auto id = suggestionChoice->currentData().toString(); if (id.isEmpty()) return;
+    for (const auto &candidate : detected) if (candidate.id == id) suggestionSession.handled.insert(suggestionKey(candidate));
+    if (suggestionPrompt) suggestionPrompt->close();
     if (config.developerMode) { addActivity("開發者預演：" + suggestionChoice->currentText() + "（未更新 Twitch）"); return; }
     if (!config.consented()) return;
     for (const auto &c : detected) if (c.id == id) { addActivity("使用者套用建議：" + c.name); client.apply({c.id, c.name, {}}); return; }
 }
 void Dock::notifySuggestion(const Candidate &candidate)
 {
+    const bool idle = candidate.executable == "@idle";
     if (suggestionPrompt) suggestionPrompt->close();
     auto *prompt = new QMessageBox(QMessageBox::Information, "偵測到遊戲 · 分類更新建議",
         QString("偵測到：%1\n目前 Twitch 分類：%2\n%3")
             .arg(candidate.name, client.current().name.isEmpty() ? "尚未取得" : client.current().name,
                  config.developerMode ? "開發者模式：只預演，不修改 Twitch。" : "要更新直播分類嗎？"), QMessageBox::NoButton, this);
     suggestionPrompt = prompt; prompt->setObjectName("categorySuggestionPrompt");
+    prompt->setProperty("idleSuggestion", idle);
+    if (idle) { prompt->setWindowTitle("遊戲已結束 · 分類更新建議"); prompt->setText("已連續 90 秒未偵測到遊戲，是否改為 Just Chatting？\n如果仍在換遊戲，選「維持目前分類」。\n" + QString(config.developerMode ? "開發者模式：只預演，不修改 Twitch。" : "只在你確認後更新，不會自動切換。")); }
     prompt->setAttribute(Qt::WA_ShowWithoutActivating);
     prompt->setAttribute(Qt::WA_DeleteOnClose); prompt->setWindowModality(Qt::NonModal); prompt->setStyleSheet(themeSheet(config));
     auto *apply = prompt->addButton(config.developerMode ? "預演套用" : "更新分類", QMessageBox::AcceptRole);
-    auto *dismiss = prompt->addButton("稍後再說", QMessageBox::RejectRole); prompt->setDefaultButton(dismiss);
+    auto *dismiss = prompt->addButton(idle ? "維持目前分類" : "本次遊戲不再提醒", QMessageBox::RejectRole); prompt->setDefaultButton(dismiss);
     apply->setEnabled(config.developerMode || (config.consented() && client.connected() && !client.busy()));
     const bool preview = config.developerMode;
-    connect(prompt, &QMessageBox::buttonClicked, this, [this, apply, candidate, preview](QAbstractButton *clicked) {
-        if (clicked != apply || stopped || preview != config.developerMode || !config.suggestionsEnabled(streaming)) return;
+    connect(prompt, &QMessageBox::buttonClicked, this, [this, apply, candidate, preview, idle](QAbstractButton *clicked) {
+        if (stopped || preview != config.developerMode || !config.suggestionsEnabled(streaming)) return;
+        if (!idle) suggestionSession.handled.insert(suggestionKey(candidate));
+        if (clicked != apply) return;
         bool stillDetected = false; for (const auto &c : detected) if (c.id == candidate.id && c.executable == candidate.executable) stillDetected = true;
-        if (!stillDetected) return;
+        if (idle ? !suggestionSession.idleReady : !stillDetected) return;
         if (preview) addActivity("開發者預演：" + candidate.name + "（未更新 Twitch）");
         else if (config.consented() && client.connected() && !client.busy()) { addActivity("使用者確認建議：" + candidate.name); client.apply({candidate.id, candidate.name, {}}); }
     });
@@ -491,6 +500,7 @@ void Dock::scan()
 {
     if (stopped || (!config.consented() && !config.developerMode)) return;
     if (!config.suggestionsEnabled(streaming)) {
+        suggestionSession.pause();
         if (unknownPrompt) unknownPrompt->close(); pendingWindow = {}; observedWindows.clear(); reviewUnknownButton->setEnabled(false); unknownStableKey.clear(); unknownLabel->setText("辨識學習隨自動偵測暫停");
         if (suggestionPrompt) suggestionPrompt->close(); notificationKey.clear();
         suggestionChoice->clear(); suggestionApply->setEnabled(false); stableKey.clear();
@@ -527,6 +537,13 @@ void Dock::processScan()
     processes.recognizedGames += learnedCandidates(processes.windows, config.recognitionRules);
     detected = candidates(processes, manualRules);
     updateUnknown(processes);
+    const auto now = QDateTime::currentSecsSinceEpoch();
+    suggestionSession.update(processes, detected, !pendingWindow.executable.isEmpty(), now);
+    if (suggestionPrompt && suggestionPrompt->property("idleSuggestion").toBool() && (!suggestionSession.idleReady || client.current().id == "509658")) suggestionPrompt->close();
+    if (suggestionSession.idleReady && !suggestionSession.idleNotified && config.notifications &&
+        (config.developerMode || client.connected()) && client.current().id != "509658") {
+        suggestionSession.idleNotified = true; notifySuggestion({"@idle", "509658", "Just Chatting", 0});
+    }
     QSet<QString> running;
     for (const auto &c : detected) running.insert(c.id);
     ignored.intersect(running);
@@ -548,9 +565,8 @@ void Dock::processScan()
         if (match == -2 || (match == -1 && !known)) uncertainForeground = true;
     }
     if (uncertainForeground) suggestionLabel->setText("前景視窗尚未確認；暫停背景遊戲的自動分類，請先確認遊戲。");
-    if (uncertainForeground || chosen < 0 || !config.suggestionsEnabled(streaming)) { stableKey.clear(); notificationKey.clear(); if (suggestionPrompt) suggestionPrompt->close(); updateAccount(); return; }
+    if (uncertainForeground || chosen < 0 || !config.suggestionsEnabled(streaming)) { stableKey.clear(); notificationKey.clear(); if (suggestionPrompt && !suggestionPrompt->property("idleSuggestion").toBool()) suggestionPrompt->close(); updateAccount(); return; }
     const auto &c = eligible[chosen]; const QString key = c.executable + "/" + c.id;
-    const auto now = QDateTime::currentSecsSinceEpoch();
     if (stableKey != key) {
         if (suggestionPrompt) suggestionPrompt->close(); notificationKey.clear();
         stableKey = key; stableSince = now;
@@ -559,15 +575,15 @@ void Dock::processScan()
     if (c.id == client.current().id) { if (suggestionPrompt) suggestionPrompt->close(); notificationKey.clear(); }
     const auto notice = key + "/" + client.current().id;
     if (config.notifications && (!config.automatic || config.developerMode || manualOverride) && (config.developerMode || client.connected()) && c.id != client.current().id &&
-        now - stableSince >= 3 && notificationKey != notice) {
+        now - stableSince >= 3 && notificationKey != notice && !suggestionSession.handled.contains(suggestionKey(c))) {
         notificationKey = notice; notifySuggestion(c);
     }
     // Require a stable candidate and one automatic attempt per candidate transition.
     if (config.developerMode) {
-        if (config.automatic && now - stableSince >= 9 && now - lastAuto >= 60 && autoAttemptKey != key) {
+        if (config.automatic && !suggestionSession.handled.contains(suggestionKey(c)) && now - stableSince >= 9 && now - lastAuto >= 60 && autoAttemptKey != key) {
             autoAttemptKey = key; lastAuto = now; addActivity("開發者預演：依規則自動套用 " + c.name + "（未更新 Twitch）");
         }
-    } else if (config.automatic && !manualOverride && config.consented() && client.connected() && !client.busy() &&
+    } else if (config.automatic && !manualOverride && !suggestionSession.handled.contains(suggestionKey(c)) && config.consented() && client.connected() && !client.busy() &&
         now - stableSince >= 9 && now - lastAuto >= 60 && c.id != client.current().id && autoAttemptKey != key) {
         autoAttemptKey = key; lastAuto = now; addActivity("依規則自動套用：" + c.name); client.apply({c.id, c.name, {}});
     }
@@ -681,7 +697,7 @@ void Dock::settingsDialog()
     auto *clear = button("清除本機資料…"); clear->setProperty("danger", true); advanced->addWidget(clear);
     connect(clear, &QPushButton::clicked, &dialog, [&] {
         if (QMessageBox::question(&dialog, "清除本機資料", "刪除偏好、遊戲映射、同意紀錄、本次活動與目前帳號憑證，並嘗試撤銷 Twitch 授權？", QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes) return;
-        client.logout(); config = {}; ignored.clear(); detected.clear(); manualOverride = false; stableKey.clear(); autoAttemptKey.clear();
+        client.logout(); config = {}; suggestionSession = {}; ignored.clear(); detected.clear(); manualOverride = false; stableKey.clear(); autoAttemptKey.clear();
         pendingWindow = {}; observedWindows.clear(); unknownNotified.clear(); if (unknownPrompt) unknownPrompt->close(); reviewUnknownButton->setEnabled(false); activityList->clear(); artCache.clear(); save(); theme(); refreshFavorites(); updateAccount(); dialog.reject();
     });
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel); outer->addWidget(buttons);
@@ -697,7 +713,7 @@ void Dock::settingsDialog()
         config.developerMode = developerMode->isChecked();
         config.learnUnknown = learn->isChecked(); config.autoDetect = autoDetect->isChecked(); config.detectLibraries = libraries->isChecked(); config.allowCategoryLookup = lookup->isChecked(); lookupAttempted.clear();
         stableKey.clear(); notificationKey.clear(); if (suggestionPrompt) suggestionPrompt->close();
-        autoAttemptKey.clear(); lastAuto = 0; save(); theme(); updateAccount(); scan(); dialog.accept();
+        suggestionSession.pause(); autoAttemptKey.clear(); lastAuto = 0; save(); theme(); updateAccount(); scan(); dialog.accept();
     });
     dialog.exec();
     if (openWizard) wizard();

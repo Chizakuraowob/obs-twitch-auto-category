@@ -74,6 +74,7 @@ private:
     QSet<QString> pendingArt;
     QString cursor, searchQuery, stableKey, autoAttemptKey;
     QString notificationKey;
+    SuggestionSession suggestionSession;
     QPointer<QMessageBox> suggestionPrompt;
     QPointer<QMessageBox> unknownPrompt;
     WindowEvidence pendingWindow;

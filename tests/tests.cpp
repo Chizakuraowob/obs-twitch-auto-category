@@ -87,6 +87,34 @@ int main(int argc, char **argv)
         try { test(); ++passed; std::printf("PASS %s\n", name); }
         catch (const std::exception &error) { ++failed; std::fprintf(stderr, "FAIL %s: %s\n", name, error.what()); }
     };
+    run("suggestion decisions survive window loss and expire only after process exit", [] {
+        SuggestionSession session;
+        Candidate game{"game.exe", "42", "Game", 0}; Processes process; process.available = true; process.executables = {"game.exe"};
+        session.update(process, {game}, false, 0); session.handled.insert(suggestionKey(game));
+        session.update(process, {}, false, 300); CHECK(session.handled.contains(suggestionKey(game))); CHECK(!session.idleReady);
+        process.available = false; process.executables.clear(); session.update(process, {}, false, 600);
+        CHECK(session.handled.contains(suggestionKey(game))); CHECK(!session.idleReady);
+        process.available = true; session.update(process, {}, false, 700);
+        session.update(process, {}, false, 759); CHECK(session.handled.contains(suggestionKey(game)));
+        process.executables = {"game.exe"}; session.update(process, {game}, false, 760); CHECK(session.handled.contains(suggestionKey(game)));
+        process.executables.clear(); session.update(process, {}, false, 800); session.update(process, {}, false, 860);
+        CHECK(!session.handled.contains(suggestionKey(game)));
+    });
+    run("Just Chatting waits for a played game, quiet interval and cancels on transitions", [] {
+        SuggestionSession session; Processes process; process.available = true;
+        session.update(process, {}, false, 0); session.update(process, {}, false, 1000); CHECK(!session.idleReady);
+        Candidate game{"game.exe", "42", "Game", 0}; process.executables = {"game.exe"}; session.update(process, {game}, false, 1001);
+        process.executables.clear(); session.update(process, {}, false, 1002); session.update(process, {}, false, 1091); CHECK(!session.idleReady);
+        session.update(process, {}, true, 1092); CHECK(!session.idleReady);
+        session.update(process, {}, false, 1100); session.update(process, {}, false, 1190); CHECK(session.idleReady);
+        session.idleNotified = true; session.update(process, {}, false, 1300); CHECK(session.idleNotified);
+        process.executables = {"other.exe"}; session.update(process, {{"other.exe", "43", "Other", 0}}, false, 1301);
+        CHECK(!session.idleReady); CHECK(!session.idleNotified);
+        process.executables.clear(); process.localGames = {{"steam:1", "Unmapped", "new.exe"}};
+        session.update(process, {}, false, 1500); CHECK(!session.idleReady);
+        process.localGames.clear(); session.update(process, {}, false, 1501); session.pause();
+        session.update(process, {}, false, 1700); CHECK(!session.idleReady);
+    });
     run("generic learning without readable paths and conflict rejection", [] {
         WindowEvidence window{"unknown-game.exe", "GameWindow", "New Game", {}, "launcher.exe", "Untrusted hint", true};
         CHECK(matchRecognition(window, {}) == -1); CHECK(learnedCandidates({window}, {}).isEmpty());

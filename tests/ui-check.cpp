@@ -21,6 +21,14 @@
 
 namespace tca {
 struct DockTestAccess {
+    static bool decisionRemembered(Dock &dock, bool accept) {
+        dock.config.developerMode = true;
+        Candidate candidate{"fixture.exe", accept ? "123" : "124", "Decision fixture", 0};
+        dock.detected = {candidate}; dock.notifySuggestion(candidate);
+        auto *prompt = dock.suggestionPrompt.data();
+        for (auto *button : prompt->buttons()) if (prompt->buttonRole(button) == (accept ? QMessageBox::AcceptRole : QMessageBox::RejectRole)) { button->click(); break; }
+        return dock.suggestionSession.handled.contains(suggestionKey(candidate));
+    }
     static bool promptOnce(Dock &dock, const WindowEvidence &window) {
         dock.config.developerMode = true;
         Processes snapshot; snapshot.windows = {window};
@@ -143,6 +151,7 @@ int main(int argc, char **argv)
         tca::DockTestAccess::review(light, fixture);
         const auto learnedSettings = tca::Settings::load(lightTemp.filePath("settings.json"), &error);
         if (learnedSettings.recognitionRules.size() != 1 || tca::matchRecognition(fixture, learnedSettings.recognitionRules) != 0) result = 38;
+        if (!tca::DockTestAccess::decisionRemembered(light, true) || !tca::DockTestAccess::decisionRemembered(light, false)) result = 40;
         light.stop(); light.hide();
         QTemporaryDir firstTemp;
         tca::Dock first(firstTemp.path()); first.resize(380, 700); first.show();
