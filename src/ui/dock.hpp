@@ -31,6 +31,8 @@ private:
     void settingsDialog();
     void wizard();
     void login();
+    void showLoginSuccess();
+    void about();
     void document(const QString &kind);
     void updateAccount();
     void addActivity(const QString &text);

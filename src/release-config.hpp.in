@@ -2,3 +2,11 @@
 // This is a public OAuth application identifier, not a secret or user credential.
 namespace tca { inline constexpr char PublisherClientId[] = "@TCA_TWITCH_CLIENT_ID@"; }
 namespace tca { inline constexpr char UpdateRepository[] = "@TCA_UPDATE_REPOSITORY@"; inline constexpr char PluginVersion[] = "@PROJECT_VERSION@"; }
+namespace tca {
+inline constexpr char ProductTitle[] = "@TCA_META_displayName@";
+inline constexpr char ProductDescription[] = "@TCA_META_description@";
+inline constexpr char ProductCopyright[] = "@TCA_META_copyright@";
+inline constexpr char ProductAuthor[] = "@TCA_META_author@";
+inline constexpr char ProductEmail[] = "@TCA_META_email@";
+inline constexpr char ProductRevision[] = "@TCA_REVISION@";
+}

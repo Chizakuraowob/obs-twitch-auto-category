@@ -13,3 +13,10 @@ Build package: obsproject/obs-deps, 2026-07-15, Windows x64 Qt bundle.
 This plugin uses Windows Schannel for TLS. It is dynamically loaded from
 the assistant's data/qt-plugins/tls directory. OBS's own Qt DLLs are used;
 they are not replaced by this package.
+
+Corresponding build source (as specified by obs-deps 2026-07-15):
+https://download.qt.io/archive/qt/6.11/6.11.1/submodules/qtbase-everywhere-src-6.11.1.zip
+SHA256: 3529cc37297a5a7aae4486843b9fd41c30df1d79a770f85e240b537dcc327ca5
+Build scripts and Windows patch: https://github.com/obsproject/obs-deps/tree/2026-07-15/deps.qt
+The SBOM revision above is metadata, not a verified downloadable upstream commit.
+See docs/source-distribution.md for release source assets and obligations.

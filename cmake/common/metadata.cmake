@@ -1,0 +1,18 @@
+# Values are quoted as data before being embedded in C++ / Windows resources.
+foreach(field IN ITEMS displayName description author email website copyright)
+  string(JSON value GET "${buildspec}" "${field}")
+  if(value MATCHES "[\r\n]")
+    message(FATAL_ERROR "buildspec.${field} must be a single line")
+  endif()
+  string(REPLACE "\\" "\\\\" value "${value}")
+  string(REPLACE "\"" "\\\"" value "${value}")
+  set(TCA_META_${field} "${value}")
+endforeach()
+string(JSON TCA_REVISION GET "${buildspec}" revision)
+if(NOT TCA_REVISION MATCHES "^[0-9]+$" OR TCA_REVISION GREATER 65535)
+  message(FATAL_ERROR "buildspec.revision must be an integer between 0 and 65535")
+endif()
+if(NOT PROJECT_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$" OR
+   PROJECT_VERSION_MAJOR GREATER 255 OR PROJECT_VERSION_MINOR GREATER 255 OR PROJECT_VERSION_PATCH GREATER 65535)
+  message(FATAL_ERROR "buildspec.version must be major.minor.patch (0..255, 0..255, 0..65535)")
+endif()

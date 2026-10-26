@@ -28,7 +28,10 @@ try {
     $uiSequence = @{}; foreach ($row in (Read-Table 'InstallUISequence')) { $uiSequence[$row[0]] = [int]$row[2] }
     if ($uiSequence.CheckObsBeforeStart -ge $uiSequence.ExecuteAction) { throw 'UI must check OBS before starting installation.' }
     $files = @(Read-Table 'File')
-    if ($files.Count -ne 9 -or @($files | Where-Object { $_[2] -match 'Qt6|\.pdb$' }).Count) { throw 'Unexpected MSI payload; do not bundle OBS Qt runtime DLLs or PDBs.' }
+    if ($files.Count -ne 15 -or @($files | Where-Object { $_[2] -match 'Qt6|\.pdb$' }).Count) { throw 'Unexpected MSI payload; do not bundle OBS Qt runtime DLLs or PDBs.' }
+    foreach ($doc in @('terms.md','privacy.md','contributors.md','third-party.md','source-distribution.md','WiX-MS-RL.txt','README.md')) {
+        if (@($files | Where-Object { ($_[2] -split '\|')[-1] -eq $doc }).Count -ne 1) { throw "Missing public document: $doc" }
+    }
     if (@($files | Where-Object { $_[2] -match 'data-processing\.md$' }).Count -ne 1) { throw 'MSI is missing the data-processing disclosure.' }
     if (@($files | Where-Object { $_[2] -match 'qschannelbackend\.dll$' }).Count -ne 1) { throw 'MSI is missing the HTTPS TLS backend.' }
     # OpenPackage + AppSearch only reads installation discovery. Never execute InstallFiles/ExecuteAction here.

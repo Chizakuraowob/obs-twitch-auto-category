@@ -25,9 +25,23 @@
 #include <QScrollBar>
 #include <cstdio>
 #include <QDateTime>
+#include <QTextBrowser>
+#include <QTabWidget>
+#include <QPromise>
 
 namespace tca {
 struct DockTestAccess {
+    static void developerScan(Dock &dock) {
+        // A real foreground window can change while these UI assertions run.
+        dock.scanTimer.stop(); dock.watcher.disconnect(&dock); dock.watcher.waitForFinished();
+        Processes snapshot; snapshot.available = true;
+        snapshot.executables = {QFileInfo(QCoreApplication::applicationFilePath()).fileName().toLower()};
+        snapshot.foreground = snapshot.executables.first();
+        QPromise<Processes> promise; promise.start(); promise.addResult(snapshot); promise.finish();
+        dock.watcher.setFuture(promise.future());
+        dock.processScan(); dock.stableSince = QDateTime::currentSecsSinceEpoch() - 10; dock.processScan();
+    }
+    static void loginSuccess(Dock &dock) { dock.showLoginSuccess(); }
     static void searchResult(Dock &dock) { emit dock.client.results({{"555", "搜尋到的遊戲", {}}}, {}); }
     static bool games(Dock &dock) { dock.suggestionSession.played = true; dock.recognitionDialog(); return dock.suggestionSession.played; }
     static bool decisionRemembered(Dock &dock, bool accept) {
@@ -103,6 +117,35 @@ int main(int argc, char **argv)
             auto *dialog = qobject_cast<QDialog *>(app.activeModalWidget());
             if (!dialog || !dialog->grab().save(output + "/settings-dark.png")) result = 6;
             if (dialog) {
+                auto *about = dialog->findChild<QPushButton *>("openAbout");
+                if (!about) result = 52;
+                else {
+                    QTimer::singleShot(50, &app, [&] {
+                        auto *page = qobject_cast<QDialog *>(app.activeModalWidget());
+                        auto *tabs = page ? page->findChild<QTabWidget *>() : nullptr;
+                        if (!tabs || tabs->count() != 5) result = 53;
+                        if (tabs) {
+                            for (int i = 0; i < tabs->count(); ++i) {
+                                auto *text = qobject_cast<QTextBrowser *>(tabs->widget(i));
+                                if (!text || text->toPlainText().size() < 100 || text->toPlainText().contains("文件無法讀取")) result = 54;
+                            }
+                            if (!page->grab().save(output + "/about.png")) result = 55;
+                        }
+                        if (page) page->reject();
+                    });
+                    about->click();
+                }
+                for (const auto &name : {"openTerms", "openPrivacy"}) {
+                    auto *open = dialog->findChild<QPushButton *>(name);
+                    if (!open) { result = 56; continue; }
+                    QTimer::singleShot(50, &app, [&] {
+                        auto *page = qobject_cast<QDialog *>(app.activeModalWidget());
+                        auto *text = page ? page->findChild<QTextBrowser *>() : nullptr;
+                        if (!text || !text->toPlainText().contains(tca::DocumentVersion)) result = 57;
+                        if (page) page->reject();
+                    });
+                    open->click();
+                }
                 auto *size = dialog->findChild<QSpinBox *>("fontSize");
                 if (!size) result = 13;
                 else size->setValue(18);
@@ -128,6 +171,10 @@ int main(int argc, char **argv)
             }
         });
         settingsButton->click();
+        tca::DockTestAccess::loginSuccess(dock); app.processEvents();
+        bool successMessage = false;
+        for (auto *text : dock.findChildren<QLabel *>()) if (text->text().contains("授權網頁可以關閉")) successMessage = true;
+        if (!successMessage) result = 58;
         QTimer::singleShot(200, &app, [&] {
             auto *wizard = qobject_cast<QWizard *>(app.activeModalWidget());
             if (!wizard) { result = 7; return; }
@@ -231,8 +278,7 @@ int main(int argc, char **argv)
         devSettings.rules.append({QFileInfo(QCoreApplication::applicationFilePath()).fileName().toLower(), "42", "本機程序預演測試", 1});
         if (!devSettings.save(devTemp.filePath("settings.json"), &error)) result = 28;
         tca::Dock developer(devTemp.path()); developer.resize(380, 900); developer.show();
-        QEventLoop preview;
-        QTimer::singleShot(14500, &preview, &QEventLoop::quit); preview.exec();
+        tca::DockTestAccess::developerScan(developer);
         bool previewLogged = false;
         for (auto *list : developer.findChildren<QListWidget *>())
             for (int i = 0; i < list->count(); ++i)
@@ -242,7 +288,7 @@ int main(int argc, char **argv)
         if (!prompt || !prompt->isVisible() || !prompt->text().contains("本機程序預演測試")) result = 30;
         if (prompt && !prompt->grab().save(output + "/category-suggestion.png")) result = 32;
         if (prompt) prompt->reject();
-        QEventLoop noRepeat; QTimer::singleShot(3500, &noRepeat, &QEventLoop::quit); noRepeat.exec();
+        tca::DockTestAccess::developerScan(developer); app.processEvents();
         if (auto *repeated = developer.findChild<QMessageBox *>("categorySuggestionPrompt"); repeated && repeated->isVisible()) result = 31;
         developer.grab().save(output + "/developer-preview.png");
         developer.stop(); app.exit(result);

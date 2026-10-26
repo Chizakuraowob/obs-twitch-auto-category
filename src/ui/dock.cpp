@@ -39,6 +39,8 @@
 #include <QTableWidget>
 #include <QHeaderView>
 #include <QTextBrowser>
+#include <QTabWidget>
+#include <windows.h>
 #include <QVBoxLayout>
 #include <QWizard>
 #include <QWizardPage>
@@ -664,15 +666,56 @@ void Dock::fetchArt(const Category &category)
         if (artCache.size() >= 100) artCache.clear(); artCache.insert(id, pixmap); show(pixmap);
     });
 }
+static QTextBrowser *documentView(const QString &resource, bool markdown = true)
+{
+    auto *view = new QTextBrowser;
+    view->setOpenLinks(false);
+    QObject::connect(view, &QTextBrowser::anchorClicked, view, [](const QUrl &url) {
+        if (url.scheme() == "https" && url.userInfo().isEmpty()) QDesktopServices::openUrl(url);
+    });
+    QFile file(":/tca/" + resource);
+    const auto text = file.open(QIODevice::ReadOnly) ? QString::fromUtf8(file.readAll()) : QStringLiteral("文件無法讀取，請參閱隨附文件或專案儲存庫。");
+    if (markdown) view->setMarkdown(text); else view->setPlainText(text);
+    return view;
+}
 void Dock::document(const QString &kind)
 {
-    QDialog dialog(this); dialog.setWindowTitle(kind + " — 待發布測試草稿"); dialog.setStyleSheet(themeSheet(config)); dialog.resize(520, 440);
-    auto *layout = new QVBoxLayout(&dialog); auto *text = new QTextBrowser;
-    if (kind == "服務條款") text->setPlainText("服務條款：待發布測試草稿\n版本：" + DocumentVersion +
-        "\n\n本軟體目前為本機測試版本，正式服務條款尚未發布。\n功能用於讀取與修改你授權的 Twitch 頻道分類。自動更新必須由你在設定中啟用。\n分類更新依賴 Twitch API 與網路，請以讀回確認的狀態為準。\n本草稿僅供測試流程辨識，不表示正式法律文件已完成。");
-    else text->setPlainText("隱私權政策：待發布測試草稿\n版本：" + DocumentVersion +
-        "\n\n本外掛會讀取本機程序檔名與前景程序，以比對遊戲映射；通用辨識讀取符合條件的前景視窗，以及已記住／待確認程序的視窗標題、類別、可讀取的路徑與父程序名稱；父程序只作線索。確認後將程序、類別、路徑 SHA-256 指紋或確認標題、分類／忽略選擇存於本機。未確認標題只留記憶體。Minecraft／異環另有本機標題比對。不讀取遊戲記憶體、不擷取畫面。\n本機遊戲庫辨識會讀取 Steam／Epic 安裝紀錄、GOG 登錄資訊與可見視窗所屬程序路徑，只在本機比對。程序清單、路徑、視窗標題及完整遊戲庫不會上傳。\n自動遊戲名稱查詢預設關閉；啟用後將偵測到的遊戲名稱送到 Twitch 官方 API。手動搜尋文字、分類 ID 與 OAuth 必要資料亦送至 Twitch；分類圖片由 Twitch CDN 下載。Twitch 可接收連線 IP 與請求時間。\nToken 存於 Windows 認證管理員；偏好、收藏、平台遊戲 ID 對 Twitch 分類的快取、映射、文件版本與 UTC 同意時間存於 OBS 外掛設定目錄。快取可在設定清除；關閉名稱查詢會停止新增查詢，但不會撤回已送出的請求。\n未知視窗標題不會自動作為聯網查詢；手動搜尋會送出你輸入的名稱。辨識規則可刪除或匯入／匯出；匯出可能含私人標題，分享前請檢查。路徑指紋不是匿名化保證。手動選擇遊戲時會在本機列出可見視窗，只儲存確認的規則。版本檢查及更新下載會連線 GitHub API、github.com 與 GitHub 下載 CDN；預設不自動檢查，不傳送 Twitch Token 或遊戲資訊。GitHub 可取得 IP 與請求資訊。下載會核對 API 提供的 SHA-256，Windows 簽章檢查僅用本機快取，未自動核對作者身分；不會自動執行安裝。更新檔保存在設定目錄 updates 子目錄，需自行刪除。活動紀錄只留於本次工作階段，沒有遙測或雲端後端。\n你可登出、撤銷授權或清除本機資料。正式資料控制者及聯絡資訊尚待提供，因此本文件不是正式政策。");
-    layout->addWidget(text); auto *close = new QDialogButtonBox(QDialogButtonBox::Close); close->button(QDialogButtonBox::Close)->setText("關閉"); layout->addWidget(close); connect(close, &QDialogButtonBox::rejected, &dialog, &QDialog::reject); dialog.exec();
+    QDialog dialog(this); dialog.setObjectName("legalDocument"); dialog.setWindowTitle(kind); dialog.setStyleSheet(themeSheet(config)); dialog.resize(580, 500);
+    auto *layout = new QVBoxLayout(&dialog);
+    layout->addWidget(documentView(kind == "服務條款" ? "terms.md" : "privacy.md"));
+    auto *close = new QDialogButtonBox(QDialogButtonBox::Close); close->button(QDialogButtonBox::Close)->setText("關閉");
+    layout->addWidget(close); connect(close, &QDialogButtonBox::rejected, &dialog, &QDialog::reject); dialog.exec();
+}
+void Dock::about()
+{
+    QDialog dialog(this); dialog.setObjectName("aboutDialog"); dialog.setWindowTitle("關於、貢獻者與開源授權"); dialog.setStyleSheet(themeSheet(config)); dialog.resize(640, 520);
+    auto *layout = new QVBoxLayout(&dialog);
+    layout->addWidget(label(QString("%1 · v%2.%3").arg(ProductTitle, PluginVersion, ProductRevision)));
+    auto *tabs = new QTabWidget; layout->addWidget(tabs);
+    tabs->addTab(documentView("contributors.md"), "貢獻者");
+    tabs->addTab(documentView("third-party.md"), "第三方授權");
+    tabs->addTab(documentView("LICENSE", false), "GPL v2");
+    tabs->addTab(documentView("WiX-MS-RL.txt", false), "MS-RL");
+    tabs->addTab(documentView("source-distribution.md"), "原始碼");
+    auto *close = new QDialogButtonBox(QDialogButtonBox::Close); close->button(QDialogButtonBox::Close)->setText("關閉");
+    layout->addWidget(close); connect(close, &QDialogButtonBox::rejected, &dialog, &QDialog::reject); dialog.exec();
+}
+void Dock::showLoginSuccess()
+{
+    setStatus("已連接 Twitch：" + client.userName() + "。授權網頁可以關閉，請繼續 OBS 設定。");
+    // Run after the login dialog unwinds, so the wizard regains activation instead of the closing dialog.
+    QTimer::singleShot(0, this, [this] {
+        if (stopped) return;
+        auto *target = QApplication::activeModalWidget();
+        if (!target) target = window();
+        target->setWindowState(target->windowState() & ~Qt::WindowMinimized); target->show();
+        const auto hwnd = reinterpret_cast<HWND>(target->winId());
+        if (!SetForegroundWindow(hwnd)) {
+            FLASHWINFO flash{sizeof(FLASHWINFO), hwnd, FLASHW_TRAY | FLASHW_TIMERNOFG, 3, 0};
+            FlashWindowEx(&flash);
+            QApplication::alert(target);
+        }
+    });
 }
 void Dock::login()
 {
@@ -687,7 +730,7 @@ void Dock::login()
     connect(open, &QPushButton::clicked, &dialog, [&] { if (!authorizeUrl.isEmpty()) QDesktopServices::openUrl(authorizeUrl); });
     connect(cancel, &QPushButton::clicked, &dialog, &QDialog::reject);
     const auto auth = connect(&client, &Client::authorization, &dialog, [&](const QUrl &url, const QString &code, int seconds) {
-        authorizeUrl = url; open->setEnabled(true); instructions->setText("已開啟 Twitch，請在瀏覽器按下授權。\n完成後會自動返回設定流程。");
+        authorizeUrl = url; open->setEnabled(true); instructions->setText("已開啟 Twitch，請在瀏覽器按下授權。\n完成後外掛會確認登入並嘗試喚回 OBS；若未切回，請點擊工作列的 OBS。網頁可自行關閉。");
         progress->setText("若頁面要求驗證碼：" + code + QString(" · 約 %1 分鐘內有效").arg(seconds / 60));
         if (!QDesktopServices::openUrl(url)) instructions->setText("無法自動開啟瀏覽器，請按下方按鈕重試。");
     });
@@ -696,7 +739,8 @@ void Dock::login()
     const auto finished = connect(&client, &Client::authorizationFinished, &dialog, [&] { open->setEnabled(false); });
     client.login(effectiveClientId()); const int result = dialog.exec();
     disconnect(auth); disconnect(account); disconnect(status); disconnect(finished);
-    if (result != QDialog::Accepted && !client.connected()) client.cancelLogin();
+    if (result == QDialog::Accepted && client.connected()) showLoginSuccess();
+    else if (!client.connected()) client.cancelLogin();
 }
 void Dock::settingsDialog()
 {
@@ -774,6 +818,14 @@ void Dock::settingsDialog()
         client.logout(); config = {}; suggestionSession = {}; ignored.clear(); detected.clear(); manualOverride = false; stableKey.clear(); autoAttemptKey.clear();
         pendingWindow = {}; observedWindows.clear();   reviewUnknownButton->setEnabled(true); activityList->clear(); artCache.clear(); save(); theme(); refreshFavorites(); updateAccount(); dialog.reject();
     });
+    auto *info = card(layout, "關於與法律資訊");
+    auto *aboutButton = button("關於、貢獻者與開源授權"); aboutButton->setObjectName("openAbout"); info->addWidget(aboutButton);
+    connect(aboutButton, &QPushButton::clicked, this, &Dock::about);
+    auto *termsButton = button("使用者條款"); termsButton->setObjectName("openTerms"); info->addWidget(termsButton);
+    connect(termsButton, &QPushButton::clicked, this, [this] { document("服務條款"); });
+    auto *privacyButton = button("隱私權政策"); privacyButton->setObjectName("openPrivacy"); info->addWidget(privacyButton);
+    connect(privacyButton, &QPushButton::clicked, this, [this] { document("隱私權政策"); });
+    info->addWidget(label(QString("v%1.%2 · %3\n%4 · %5\nGPL v2 或更新版本 · 第三方保有其著作權").arg(PluginVersion, ProductRevision, ProductCopyright, ProductAuthor, ProductEmail)));
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel); outer->addWidget(buttons);
     buttons->button(QDialogButtonBox::Save)->setText("儲存"); buttons->button(QDialogButtonBox::Cancel)->setText("取消");
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
@@ -806,10 +858,10 @@ void Dock::wizard()
     page("歡迎", "在 OBS 原生 Dock 管理 Twitch 分類。此版本為測試版，正式條款與隱私政策待發布。");
     page("功能簡介", "搜尋並手動更新分類、讀回確認結果、依已記住的遊戲提出建議。\n預設每次詢問；手動操作不需要先開始直播。");
     auto *consent = new ConsentPage; consent->setTitle("閱讀文件並同意");
-    auto *consentLayout = new QVBoxLayout(consent); consentLayout->addWidget(label("以下是待發布測試草稿。正式版本發布後需要重新同意。")); wizard.addPage(consent);
-    auto *terms = button("閱讀服務條款（測試草稿）"); consent->layout()->addWidget(terms); connect(terms, &QPushButton::clicked, this, [this] { document("服務條款"); });
-    auto *privacy = button("閱讀隱私權政策（測試草稿）"); consent->layout()->addWidget(privacy); connect(privacy, &QPushButton::clicked, this, [this] { document("隱私權政策"); });
-    auto *agreeTerms = new QCheckBox("我已閱讀並同意服務條款測試草稿"); auto *agreePrivacy = new QCheckBox("我已閱讀並同意隱私權政策測試草稿");
+    auto *consentLayout = new QVBoxLayout(consent); consentLayout->addWidget(label("請閱讀本版本的使用者條款與隱私權政策；文件版本與聯絡方式列於內文。")); wizard.addPage(consent);
+    auto *terms = button("閱讀使用者條款"); consent->layout()->addWidget(terms); connect(terms, &QPushButton::clicked, this, [this] { document("服務條款"); });
+    auto *privacy = button("閱讀隱私權政策"); consent->layout()->addWidget(privacy); connect(privacy, &QPushButton::clicked, this, [this] { document("隱私權政策"); });
+    auto *agreeTerms = new QCheckBox("我已閱讀並同意使用者條款"); auto *agreePrivacy = new QCheckBox("我已閱讀並同意隱私權政策");
     consent->layout()->addWidget(agreeTerms); consent->layout()->addWidget(agreePrivacy);
     consent->require("terms", agreeTerms); consent->require("privacy", agreePrivacy);
     auto *authorize = new LoginPage(&client); authorize->setTitle("連接 Twitch 帳號"); wizard.addPage(authorize);

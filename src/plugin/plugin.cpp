@@ -9,10 +9,11 @@
 #include <QCoreApplication>
 #include <QSslSocket>
 #include "ui/dock.hpp"
+#include "release-config.hpp"
 
 OBS_DECLARE_MODULE()
 OBS_MODULE_USE_DEFAULT_LOCALE("twitch-category-assistant", "zh-TW")
-MODULE_EXPORT const char *obs_module_description(void) { return "Twitch Category Assistant — native category management dock"; }
+MODULE_EXPORT const char *obs_module_description(void) { return tca::ProductDescription; }
 static QPointer<tca::Dock> dock;
 static bool exiting = false;
 static void eventCallback(enum obs_frontend_event event, void *)

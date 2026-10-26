@@ -1,104 +1,157 @@
-# Twitch Category Assistant — 開發與發佈指南
+# Twitch 分類助手
 
-這份文件供作者與貢獻者使用。一般使用者請閱讀 [github_README.md](github_README.md)。
+在 OBS 裡搜尋、切換 Twitch 直播分類，讓直播分類跟上你的遊戲。
 
-Windows 11 x64 原生 OBS Dock，C++17 / Qt Widgets；目前針對 OBS 32.2.2、Qt 6.11.1 建置。驗證狀態與限制見 [驗證紀錄](docs/validation.md)。
+目前為開發預覽版，支援 Windows 11 x64，針對 OBS Studio 32.2.2 建置。正式公開發行尚未完成；未配置作者登入服務的 Preview 安裝包僅供測試。
 
-## OAuth：由發佈者配置，一般使用者直接授權
+## 關於
 
-仍使用 OAuth 的 **Public Client Device Code Flow**。正式發行的 DLL 內建公開 Client ID；使用者只需按「連接 Twitch」，在 Twitch 官方網頁登入授權，再返回精靈。使用者不需要 Developer Console、Client Secret 或自行編譯。
+Twitch 分類助手是開源的 OBS 原生停駐面板。你可以搜尋分類並手動套用，也可以建立遊戲規則，讓外掛依本機執行中的遊戲提出建議。
 
-發佈者只需在 [Twitch Developer Console](https://dev.twitch.tv/console/apps) 註冊一次 Public 類型應用程式，建置時傳入 Client ID。這是應用程式識別碼，不是密鑰；可以存在公開二進位檔。不要把 Client Secret、Token 或 Stream Key 放入建置參數。
+- 按「連接 Twitch」，在 Twitch 官方網站授權。正式發行版不需申請開發者帳號或填寫 Client ID。
+- 更新後向 Twitch 讀回分類，確認成功才顯示完成。
+- 預設每次由你決定；也能開啟規則自動更新。
+- 淺色、深色、跟隨系統，以及字型、字級和動畫設定。
+- 沒有遙測或自建雲端後端。程序比對在本機完成；OAuth、搜尋與分類更新會連線到 Twitch。
 
-權限為 `channel:manage:broadcast`。登入後驗證 client/user/scope；啟動及每小時驗證 Token，401 時串行刷新。Token 存在目前 Windows 使用者的認證管理員。未完成有效登入，精靈不能進入下一步或標記完成。
+<img src="docs/images/dock-preview.png" alt="Twitch 分類助手原生 OBS 面板，尚未連線狀態" width="380">
 
-未配置 ID 的開發版會顯示說明；作者可在「設定 → 進階與帳號 → 開發者選項」暫時填入 ID。這個測試選項不出現在已內建 ID 的發行版。正式 MSI 封裝命令會拒絕未配置 ID 的建置；`-Preview` 僅供作者檢查安裝流程。
+[查看外觀與字型設定畫面](docs/images/settings-preview.png)
 
-## 建置
+## 安裝
 
-依 [工具鏈說明](docs/toolchain-setup.md) 安裝 Visual Studio 2026 Build Tools、Windows SDK 26100、CMake 4.2+。一般使用者不需這些工具。
+### MSI 安裝（一般使用者）
+
+從 [GitHub Releases](https://github.com/Chizakuraowob/obs-twitch-auto-category/releases) 下載已發布的 Windows x64 `.msi`。尚未發布 Release 時不會有可下載版本；請勿把 `unconfigured-preview` 當成可直接登入的正式版。
+
+1. 先安裝 OBS Studio 32.2.2 x64，結束直播與錄影。
+2. 雙擊 MSI，依照畫面安裝；需要 Windows 管理員授權。
+3. 若 OBS 正在執行，先結束直播／錄影並手動關閉，再按「重試」；也可取消安裝。安裝器不會關閉或強制終止 OBS，靜默安裝遇到 OBS 執行中會停止。
+4. 完成頁可勾選啟動 OBS。首次啟動會顯示「Twitch 分類助手」面板和設定精靈。
+
+不需安裝編譯器、Qt、WiX 或 .NET。外掛安裝於 `%ProgramData%/obs-studio/plugins/twitch-category-assistant`，不覆寫 OBS 自身的 DLL。
+
+若之前是手動複製版本，請先備份並移走舊外掛資料夾，再安裝 MSI。MSI 版本之間可直接使用更新版升級。
+
+### 自行編譯與封裝（進階使用者）
+
+取得本專案原始碼，依 [作者建置指南](docs/development.md) 安裝工具鏈並執行：
 
 ```powershell
-# 發佈者：將以下值換成自己的 Public Client ID
 .\scripts\build.ps1 -ClientId 'YOUR_PUBLIC_CLIENT_ID'
-
-# 本地開發可不指定 ID；保留 CMake cache 內已配置的值
-.\scripts\build.ps1
-# 明確清除內建 ID：.\scripts\build.ps1 -ClientId ''
-```
-
-腳本下載並驗證官方 OBS 32.2.2 / OBS dependencies 2026-07-15，編譯、執行測試，將 DLL 與資料放進 `dist/twitch-category-assistant`。執行時使用 OBS 隨附的 Qt 執行環境；額外封裝匹配版本的 `qschannelbackend.dll` 至 `data/qt-plugins/tls`，供 HTTPS 使用，並附其授權與來源資訊。OBS 的 Qt Core／Network／Widgets DLL 不會被替換。
-
-## 產生 MSI
-
-```powershell
-# 已配置 Client ID 並完成建置後
 .\scripts\package-msi.ps1
-# 作者目前尚未配置 ID 時，只產生明確標示的測試安裝包
-.\scripts\package-msi.ps1 -Preview
 ```
 
-封裝需要 .NET 8 Runtime x64 或更新相容版本（本機已有），不需要 .NET SDK。腳本下載固定 SHA256 的 WiX 4.0.6 和 UI/Util 擴充到 `.tools/wix`，不全域安裝。使用者執行 MSI 不需要 .NET、WiX 或編譯器。
+自行發佈的分支需使用自己的 Public OAuth 應用程式識別碼；一般使用者安裝作者發行的 MSI 不需要做這一步。不輸入 ID 也能編譯檢查介面；登入需在配置之後使用。
 
-輸出在 `dist/installer/`，含 MSI 與 SHA256。MSI 安裝至 `%ProgramData%/obs-studio/plugins/twitch-category-assistant`，支援升級與 Windows 已安裝應用程式解除安裝。偵測 OBS 官方安裝登錄路徑；可攜版使用手動安裝。安裝前先結束直播與錄影；安裝器可依提示請求 OBS 正常關閉，不強制終止程序。完成頁可勾選啟動 OBS。靜默安裝遇到 OBS 執行中會失敗，不自動關閉 OBS。
+若不用 MSI，關閉 OBS，把 `dist/twitch-category-assistant` 複製到上述 plugins 目錄。可攜版與非標準配置請參照 [OBS 外掛安裝說明](https://obsproject.com/kb/plugins-guide)；目前 MSI 偵測的是官方安裝版。
 
-目前安裝包未簽章，正式法律文件仍為測試草稿。正式發布前需配置真實 ID、更新法律文件及版本、執行 Twitch/OBS/安裝升級移除驗收，並以作者憑證簽章。發布時應一併提供對應來源與 GPL 授權。每次升級增加 `buildspec.json` 的三段版本號；保持 installer 的 UpgradeCode 固定。
+## 使用說明
 
-Windows Smart App Control 會檢查被 OBS 載入的 DLL，不只 MSI。正式發行需向受信任的憑證機構／簽章服務取得程式碼簽章身分；本機自簽憑證不等於受信任的公開發行簽章。依序簽署外掛 DLL（build 與 dist 必須維持相同檔案）、封裝的 TLS DLL，再產生及簽署 MSI，最後重新產生 MSI SHA256。使用 SHA256 摘要與可信時間戳，並以 Windows SDK SignTool `verify /pa /v` 檢查每個檔案。仍須在啟用 Smart App Control 的測試機驗收；不能宣稱簽章即保證通過所有組織政策。
+1. 在首次設定精靈功能說明、條款與隱私政策，勾選同意。文件版本與聯絡資訊請見頁面內說明。
+2. 按「連接 Twitch」，在官方網站完成登入與授權；如網頁要求驗證碼，使用面板顯示的代碼。外掛不會索取 Twitch 密碼。
+3. 授權驗證成功後，外掛會顯示成功提示並嘗試喚回 OBS；若視窗未切換，請點擊工作列的 OBS。Twitch 完成頁可自行關閉。顯示已連線後才可繼續設定。
+4. 在面板搜尋遊戲或分類，選取結果後按「套用選取分類」。即使尚未開播也能手動更新。
+5. 在「設定 → 我的遊戲」按「新增遊戲」，選取遊戲視窗與 Twitch 分類後記住，不需填寫程序名稱或分類 ID。搜尋結果下方也可直接開始。
+6. 選取搜尋結果後按「加入我的最愛」。之後可在「我的最愛」直接選擇及套用，不必重新搜尋；最多儲存 100 筆，收藏保存在本機，重開 OBS 仍會保留。「移除收藏」不會變更 Twitch 分類。
 
-參考：[Microsoft Smart App Control 簽章說明](https://learn.microsoft.com/windows/apps/develop/smart-app-control/code-signing-for-smart-app-control)。請勿將關閉 Windows 安全防護加入安裝流程。
+「設定」可更改字型、12–22 px 字級、主題、動畫、通知與多遊戲處理方式。字型和字級會即時預覽，按「儲存」才套用。設定精靈位於設定頁最上方。活動紀錄預設收合，點選即可展開。
 
-## 手動安裝與測試
+「自動偵測與分類更新詢問」可控制偵測開關、本機 Steam／Epic／GOG 遊戲庫、每次詢問或自動更新、詢問視窗與僅串流時偵測。一般自動更新模式不會先詢問又自行套用；開發者預演與手動覆寫後仍可顯示建議。
 
-關閉 OBS，複製 `dist/twitch-category-assistant` 至 `%ProgramData%/obs-studio/plugins/`。`scripts/install-plugin.ps1` 可協助第一次複製，但遇到既有目錄會停止，避免覆蓋未確認的版本。舊的手動安裝轉 MSI 前請先備份並移走舊外掛目錄。
+本機遊戲庫會依安裝紀錄及可見遊戲視窗的程序路徑辨識，支援各平台的多個遊戲，不需逐一輸入 .exe。首次分類對應可選：
 
-首次啟動 OBS 時會將 Dock 停駐在右側並顯示設定精靈。完成後尊重使用者保存的版面；未完成精靈則下次啟動再次提示。由舊版升級時重新確認精靈完成狀態，以修正舊版允許跳過登入的問題。
+- **不聯網自動查詢（預設）**：搜尋 Twitch 分類後，在下方選擇偵測到的本機遊戲，按「將選取分類連結到這款本機遊戲」。手動搜尋本身仍會連線 Twitch。
+- **允許遊戲名稱查詢**：設定中開啟聯網選項後，只將偵測到的執行中遊戲名稱送至 Twitch 官方 API，取得唯一同名分類後保存在本機；名稱不同或不明確時仍需手動連結。程序路徑、視窗標題與完整遊戲庫不會傳送。
 
-```powershell
-# build.ps1 已設定 Qt PATH 並執行下面兩項 CTest
-# tca-tests：設定、程序映射、OAuth、API 更新與錯誤分支
-# tca-ui-check：實際 Qt widgets、同意與登入必填、字級儲存與截圖
-```
+詳細資料來源、傳送項目、保存與刪除行為見 [資料處理清單](docs/data-processing.md)。本機遊戲庫約每分鐘重新讀取，不會自動下載第三方遊戲資料庫。Xbox／EA／Ubisoft／Battle.net／非標準安裝可使用下方通用辨識，不能保證涵蓋所有遊戲。
 
-實際 Twitch 測試必須由使用者在官方網站授權，不能由 Mock 測試代替。OBS 載入及 MSI 安裝也須另做實機驗證，見 [驗證紀錄](docs/validation.md)。
+自動更新必須自行開啟，並符合明確且穩定的遊戲規則。手動套用後暫停自動覆寫；按「恢復自動分類」才恢復。預設只在本機 OBS 串流期間提出自動建議，可在設定調整。
 
-`tca-tls-check` 會在清除 SDK 的 Qt 插件搜尋路徑後檢查 TLS 封裝。需要實際測試取得 Twitch 授權網址時，將 OBS 的 `bin/64bit` 加入目前終端 PATH，再執行：
+Minecraft Java／Windows 版已有內建辨識，不必先建立規則。Java 版會比對遊戲視窗的 `Minecraft 版本號` 標題（包含 `Minecraft* 1.21.11`），不會把所有 `javaw.exe` 或啟動器視為 Minecraft；改寫視窗標題的模組可能無法辨識。不在本機遊戲庫中的遊戲仍可建立程序映射，自訂映射優先。
 
-```powershell
-.\build_x64\RelWithDebInfo\tca-tls-check.exe .\dist\twitch-category-assistant\data\qt-plugins --device
-```
+偵測到穩定候選且 Twitch 分類不同時，啟用 Dock 通知會顯示非阻塞的分類更新建議視窗。套用或選擇「本次遊戲不再提醒」後，同一次程序執行期間不再彈出同一分類；切換視窗、最小化及短暫辨識中斷不會清掉決定。程序連續消失 60 秒後才重設，快速重啟也可能沿用先前決定。仍可在面板手動套用；明確按「恢復自動分類」會解除先前的提醒決定。掃描每 3 秒一次，首次提示通常約需 6–9 秒。內建 Minecraft 比對不保存標題；另行確認通用規則時會依所選條件在本機保存標題或路徑指紋。
 
-此檢查使用已內建的 Client ID，只取得裝置授權網址，不開瀏覽器、不輪詢、不保存 Token。發佈安裝包時必須包含整個 data 目錄，單獨複製 DLL 會漏掉 TLS 元件。
+開發測試：在「設定 → 進階與帳號」勾選「開發者模式」，儲存後不必登入或開台即可測試既有映射規則。啟動對應遊戲程序，面板會標示本機預演。若要驗證自動套用判斷，選擇自動更新策略與可明確選出的多遊戲策略；候選穩定至少 9 秒後，最近活動會記錄預演結果，同一候選不重複套用且有 60 秒間隔。開發者模式的建議套用不會送出 Twitch 更新，但搜尋結果與收藏的手動套用仍會真的更新。測試完請關閉此模式；「暫停自動分類建議」仍優先生效。
 
-## 專案結構
+### 我的遊戲與聊天建議（0.5.0）
 
-- `src/plugin/`：OBS 生命週期、首次停駐與串流事件。
-- `src/ui/`：Dock、設定、規則、OAuth 精靈與文件。
-- `src/twitch/`：Device OAuth、Helix、更新後讀回、頻率限制。
-- `src/detection/`：本機程序與映射規則；不注入遊戲。
-- `src/security/`：Windows Credential Manager。
-- `src/settings/`：偏好、文件同意與原子儲存。
-- `tests/`：核心與 UI 回歸測試；Mock 僅在測試使用。
-- `installer/`、`scripts/`：MSI 規格及建置封裝。
+「設定 → 我的遊戲」整合已確認視窗、既有程序規則與遊戲庫分類對應。空白時按「新增遊戲」：先開啟遊戲，從視窗清單選取，再選搜尋結果、收藏或目前 Twitch 分類。沒有想要的分類時，可在確認視窗直接搜尋，結果會加入分類選單。程序、標題比對條件與路徑指紋收在「進階辨識資訊」。
 
-## Git 與官方參考
+每筆資料可以更改分類、標記不是遊戲或忘記。既有規則不會因升級消失；忘記遊戲庫對應後，若仍允許名稱聯網查詢，可能再次取得對應，要停止辨識請選不是遊戲。匯入／匯出僅包含已確認視窗規則，分享前檢查私人標題。
 
-衍生自 OBS 官方 [obs-plugintemplate](https://github.com/obsproject/obs-plugintemplate)，保留 GPL-2.0-or-later。專案使用本機 Git main；upstream 指向官方模板。尚未設定公開專案 remote 或推送。
+一般未確認視窗只會在面板提供線索，不主動彈窗，也不阻止 Just Chatting 倒數。設定精靈及設定頁都能開關聊天建議與調整 **15～600 秒**等待時間（預設 90 秒，最長 10 分鐘）。請輸入範圍內的整數；可直接按儲存，不必先按 Enter。已確認遊戲程序退出後開始計時；另一款已辨識遊戲或未對應的遊戲庫候選會暫停倒數。
 
-- [Twitch Device Code OAuth](https://dev.twitch.tv/docs/authentication/getting-tokens-oauth/#device-code-grant-flow)
-- [Token 驗證](https://dev.twitch.tv/docs/authentication/validate-tokens/)
-- [Twitch API](https://dev.twitch.tv/docs/api/reference/)
-- [OBS Frontend API](https://docs.obsproject.com/reference-frontend-api)
-- [OBS 32.2.2 建置設定](https://github.com/obsproject/obs-studio/blob/32.2.2/CMakePresets.json)
+聊天提醒一律手動確認。正在換遊戲時可延後一個等待期，或選「維持目前分類」停止本次提醒。遊戲程序若仍留在背景，會保守地不提示；無法保證辨識所有新遊戲。
 
-0.3.0 的本機遊戲庫辨識與可選聯網查詢，詳見 [資料處理清單](docs/data-processing.md)。發布條款與隱私政策時請依此清單確認來源、傳送項目、保存、刪除及第三方責任；尚未證明涵蓋市場多數遊戲。
+### 版本與更新
 
-0.4.0 新增通用視窗辨識、一次確認後保存、忽略及規則匯入／匯出，不需替新遊戲新增程式規則。設定與資料處理清單已更新；發布前應檢查新版同意草稿、匯出隱私提示及實際遊戲辨識。
+在「設定 → 版本與更新」檢查作者 GitHub 穩定版、閱讀更新說明或略過版本。啟動自動檢查預設關閉。只有按下載才取得 MSI，下載後核對大小與 SHA-256；沒有公開穩定版時會明確提示。
 
-## 0.5.0 發布與更新來源
+完成後開啟下載資料夾，**結束直播／錄影並關閉 OBS，再手動安裝**。目前不自動執行 MSI，不支援免重啟熱更新。SHA-256 不等同可信任作者簽章，未簽章版仍可能遭 Windows 阻擋。連線與保存行為見 [資料處理清單](docs/data-processing.md)。
 
-更新來源由 CMake `TCA_UPDATE_REPOSITORY` 固定為 `Chizakuraowob/obs-twitch-auto-category`；衍生專案應改成自己的儲存庫，留空可停用。檢查 `/releases/latest`，只接受 `vX.Y.Z` 或 `X.Y.Z` 的穩定版。Release 請附上 `twitch-category-assistant-X.Y.Z-windows-x64.msi`；GitHub API 必須提供該資產的 SHA-256 digest 與大小，否則拒絕內建下載。打包腳本亦產生 `.sha256` 供人工核對。
+## 常見問題
 
-外掛下載後檢查雜湊及本機 Windows 簽章狀態，但沒有配置作者身分釘選，因此不自動執行安裝。請關閉 OBS 再手動執行 MSI。發布前仍需測試簽章、升級與實際安裝；本次不會自動建立 GitHub Release 或推送儲存庫。
+### Windows 顯示智慧型應用程式控制警告，OBS 說外掛載入失敗？
 
-MSI 原生檢查工具不依賴 Qt，不發送關閉訊息或終止程序。`tca-installer-test.exe MSI_PATH CHECK_DLL_PATH FIXTURE_EXE_PATH` 在真實 MSI session 中直接呼叫程序檢查函式，測試靜默阻擋、取消、重試，不執行檔案安裝。假 OBS fixture 只等待本測試的結束事件，不是實際 OBS。
+目前測試版尚未數位簽章，Windows 的應用程式控制可能阻擋 DLL，即使 MSI 安裝成功也不代表 DLL 可以載入。請提供警告中的檔名與 OBS 記錄給作者；不要以關閉系統防護作為安裝步驟。正式簽章發行版尚未提供。
+
+作者可在事件檢視器的 `Microsoft-Windows-CodeIntegrity/Operational` 查看 3077／3033 事件，核對被阻擋的檔案。若 OBS 記錄已出現 `[Twitch Category Assistant] native dock initialized`，代表該次啟動已完成本外掛初始化；其他外掛的錯誤需要另行核對。
+
+**面板不見了？**
+
+在 OBS「停駐視窗」選單勾選「Twitch 分類助手」。首次設定完成後會保留你儲存的面板位置，不會每次啟動都重排版面。
+
+**為什麼登入後還不能下一步？**
+
+請確認已在 Twitch 網頁按下授權，並等面板顯示「已連線」。關閉網頁、取消授權、過期或網路失敗都不算登入成功，可關閉登入視窗後重試。
+
+**顯示「尚未配置作者的登入服務」？**
+
+你使用的是作者測試用 Preview；正式發行版會內建登入設定。一般使用者不必為此註冊 Developer Console。
+
+**看不到遊戲建議？**
+
+先在「我的遊戲」選取遊戲視窗並記住分類，確認未暫停建議；若啟用「僅串流時」，需要 OBS 已開始串流。多個遊戲同時執行時，依所選策略手動決定或選擇優先項。
+
+**按登入後顯示連線中斷／TLS 元件載入失敗，網頁沒有開啟？**
+
+0.2.1 及以前的安裝包漏了 HTTPS 所需元件。請更新至 0.2.2 或更新版，完整關閉並重新開啟 OBS，再登入。手動安裝時須一起複製 `bin` 與 `data` 資料夾。
+
+**顯示「已接受／確認中」或「結果不確定」？**
+
+Twitch 接受修改與外掛確認結果是兩個階段。請等讀回確認或重新整理，避免連續重複操作。遇到頻率限制請等待面板提示的時間。
+
+**資料放在哪？**
+
+偏好、遊戲規則與文件同意時間存於 OBS 的外掛設定目錄；Token 存於 Windows 認證管理員。活動紀錄只保留本次工作階段。外掛不傳送程序清單或收集遙測；Twitch 仍需接收授權、搜尋和分類修改資料。
+
+**如何登出或移除？**
+
+在外掛設定按「登出並嘗試撤銷授權」，或使用「清除本機資料」。之後關閉 OBS，在 Windows「已安裝的應用程式」移除 Twitch Category Assistant。解除安裝保留個人設定與憑證，方便重新安裝；若需完全移除資料，請先使用外掛的清除功能。也可在 Twitch 的連線設定撤銷應用程式授權。
+
+**其他 OBS 版本、Windows 通知、自動更新？**
+
+目前針對 OBS 32.2.2 / Qt 6.11.1；其他版本需另做相容性驗證。支援 Dock 內通知，尚無 Windows 系統通知；已提供 GitHub 版本檢查與手動下載，不會自動執行安裝或熱替換 DLL。
+
+## 貢獻者
+
+歡迎在本專案提交 Issue、重現步驟、介面建議或 Pull Request。問題回報請附 Windows/OBS/外掛版本與錯誤訊息，不要附 Token、密碼或 Stream Key。開發與驗證流程見 [開發指南](docs/development.md)。
+
+感謝 [OBS Project](https://obsproject.com/) 與官方 [obs-plugintemplate](https://github.com/obsproject/obs-plugintemplate) 提供基礎。貢獻紀錄以本專案 Git 歷史及 GitHub Contributors 為準。
+
+採用 [GPL-2.0-or-later](LICENSE)。這是第三方社群外掛，並非 Twitch 官方產品。
+
+異環（0.3.1）：支援 `HTGame.exe` 與 `NTE` 遊戲視窗的本機辨識，即使程序路徑無法讀取也可使用。啟用「辨識本機遊戲庫與支援的獨立遊戲」後，可使用既有聯網查詢或手動連結分類。面板會區分「尚未偵測到」、「已偵測到但未對應」及「正在向 Twitch 查詢」，聯網開關不代表任意遊戲都會自動被辨識。
+
+## 法律資訊與維護
+
+© 2026 Chizakura 與貢獻者。原創程式與文件採 GPL-2.0-or-later，第三方依各自授權。
+
+- [使用者條款](docs/terms.md) · [隱私權政策](docs/privacy.md)
+- [貢獻者](docs/contributors.md) · [第三方授權](docs/third-party.md) · [原始碼提供](docs/source-distribution.md)
+- [開發指南](docs/development.md) · [驗證紀錄](docs/validation.md) · [後續待辦](docs/backlog.md)
+
+設定頁最下方可離線閱讀以上法律與貢獻資訊。公開發布前請確認文件內的維護者資訊與來源資產清單。
+
+作者：Chizakura（GitHub：Chizakuraowob）；聯絡信箱：admin@chizakura.dev。開發者若要更改安裝包／DLL 顯示資訊，請見 [產品資訊編輯指南](docs/edit-release-metadata.md)。

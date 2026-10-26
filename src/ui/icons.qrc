@@ -1,1 +1,10 @@
-<RCC><qresource prefix="/tca"><file alias="down.svg">icons/down.svg</file><file alias="up.svg">icons/up.svg</file><file alias="check.svg">icons/check.svg</file></qresource></RCC>
+<RCC><qresource prefix="/tca">
+<file alias="down.svg">icons/down.svg</file><file alias="up.svg">icons/up.svg</file><file alias="check.svg">icons/check.svg</file>
+<file alias="terms.md">../../docs/terms.md</file>
+<file alias="privacy.md">../../docs/privacy.md</file>
+<file alias="contributors.md">../../docs/contributors.md</file>
+<file alias="third-party.md">../../docs/third-party.md</file>
+<file alias="source-distribution.md">../../docs/source-distribution.md</file>
+<file alias="LICENSE">../../LICENSE</file>
+<file alias="WiX-MS-RL.txt">../../docs/licenses/WiX-MS-RL.txt</file>
+</qresource></RCC>

@@ -42,8 +42,19 @@
   },
   "name": "twitch-category-assistant",
   "displayName": "Twitch Category Assistant",
-  "version": "0.5.1",
-  "author": "Twitch Category Assistant contributors",
-  "website": "",
-  "email": ""
+  "version": "0.5.2",
+  "author": "Chizakura",
+  "website": "https://github.com/Chizakuraowob/obs-twitch-auto-category",
+  "email": "admin@chizakura.dev",
+  "description": "OBS Twitch 直播分類管理與遊戲辨識助手",
+  "copyright": "Copyright (C) 2026 Chizakura and contributors",
+  "revision": 0,
+  "installer": {
+    "title": "Twitch 分類助手安裝程式",
+    "subject": "OBS Twitch 分類助手",
+    "comments": "安裝 Twitch 分類助手至 OBS Studio。",
+    "keywords": "OBS,Twitch,分類助手",
+    "welcome": "歡迎使用 Twitch 分類助手安裝精靈",
+    "welcomeText": "安裝前請先結束直播或錄影並關閉 OBS。安裝後可在 OBS 內連接 Twitch，搜尋分類與設定遊戲辨識。"
+  }
 }

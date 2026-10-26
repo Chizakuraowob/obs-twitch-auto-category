@@ -1,6 +1,7 @@
 /*
-Plugin Name
-Copyright (C) <Year> <Developer> <Email Address>
+Twitch Category Assistant
+Copyright (C) 2026 Chizakura and contributors
+Based on obsproject/obs-plugintemplate; upstream license retained.
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by

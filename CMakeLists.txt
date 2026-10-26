@@ -3,6 +3,9 @@ cmake_minimum_required(VERSION 4.2)
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/common/bootstrap.cmake" NO_POLICY_SCOPE)
 
 project(${_name} VERSION ${_version})
+include(cmake/common/metadata.cmake)
+file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/buildspec.json" TCA_BUILDSPEC_SHA256)
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/generated/buildspec.sha256" "${TCA_BUILDSPEC_SHA256}")
 
 set(TCA_TWITCH_CLIENT_ID "" CACHE STRING "Publisher's public Twitch application Client ID")
 set(TCA_UPDATE_REPOSITORY "Chizakuraowob/obs-twitch-auto-category" CACHE STRING "Publisher's GitHub release repository")

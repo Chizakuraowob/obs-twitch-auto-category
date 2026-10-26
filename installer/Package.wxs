@@ -2,7 +2,7 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui"
      xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
-  <Package Name="$(var.ProductName)" Manufacturer="Twitch Category Assistant contributors"
+  <Package Name="$(var.ProductName)" Manufacturer="$(var.Manufacturer)"
            Version="$(var.ProductVersion)" Language="1028" Codepage="950" Scope="perMachine"
            UpgradeCode="BF633767-A341-4DDC-9007-BEF9D7DA2F4B">
     <MajorUpgrade DowngradeErrorMessage="已安裝較新的 Twitch 分類助手，請使用相同或更新版本。" />
@@ -42,9 +42,17 @@
         <Directory Id="ObsPlugins" Name="plugins">
           <Directory Id="INSTALLFOLDER" Name="twitch-category-assistant">
             <Component Id="LicenseFile" Guid="*"><File Source="$(var.ProjectRoot)\LICENSE" KeyPath="yes" /></Component>
-            <Component Id="ReadmeFile" Guid="*"><File Source="$(var.ProjectRoot)\github_README.md" KeyPath="yes" /></Component>
+            <Component Id="ReadmeFile" Guid="*"><File Source="$(var.ProjectRoot)\README.md" KeyPath="yes" /></Component>
             <Directory Id="PluginDocs" Name="docs">
               <Component Id="DataProcessingDoc" Guid="*"><File Source="$(var.ProjectRoot)\docs\data-processing.md" KeyPath="yes" /></Component>
+              <Component Id="TermsDoc" Guid="*"><File Source="$(var.ProjectRoot)\docs\terms.md" KeyPath="yes" /></Component>
+              <Component Id="PrivacyDoc" Guid="*"><File Source="$(var.ProjectRoot)\docs\privacy.md" KeyPath="yes" /></Component>
+              <Component Id="ContributorsDoc" Guid="*"><File Source="$(var.ProjectRoot)\docs\contributors.md" KeyPath="yes" /></Component>
+              <Component Id="ThirdPartyDoc" Guid="*"><File Source="$(var.ProjectRoot)\docs\third-party.md" KeyPath="yes" /></Component>
+              <Component Id="SourceDoc" Guid="*"><File Source="$(var.ProjectRoot)\docs\source-distribution.md" KeyPath="yes" /></Component>
+              <Directory Id="LegalLicenses" Name="licenses">
+                <Component Id="WixLicense" Guid="*"><File Source="$(var.ProjectRoot)\docs\licenses\WiX-MS-RL.txt" KeyPath="yes" /></Component>
+              </Directory>
             </Directory>
             <Directory Id="PluginBin" Name="bin"><Directory Id="PluginBin64" Name="64bit">
               <Component Id="PluginDll" Guid="*"><File Source="$(var.Payload)\bin\64bit\twitch-category-assistant.dll" KeyPath="yes" /></Component>
@@ -69,6 +77,8 @@
       <ComponentRef Id="PluginDll" /><ComponentRef Id="ChineseLocale" /><ComponentRef Id="EnglishLocale" />
       <ComponentRef Id="LicenseFile" /><ComponentRef Id="ReadmeFile" />
       <ComponentRef Id="DataProcessingDoc" />
+      <ComponentRef Id="TermsDoc" /><ComponentRef Id="PrivacyDoc" /><ComponentRef Id="ContributorsDoc" />
+      <ComponentRef Id="ThirdPartyDoc" /><ComponentRef Id="SourceDoc" /><ComponentRef Id="WixLicense" />
       <ComponentRef Id="SchannelTls" /><ComponentRef Id="QtTlsNotice" /><ComponentRef Id="QtTlsLicense" />
     </Feature>
     <ui:WixUI Id="WixUI_Minimal" />
