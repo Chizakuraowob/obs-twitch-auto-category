@@ -14,15 +14,17 @@
 
 ## 安裝
 
+[**下載 Windows 安裝檔（.msi，v0.5.4）**](https://github.com/Chizakuraowob/obs-twitch-auto-category/releases/download/v0.5.4/twitch-category-assistant-0.5.4-windows-x64.msi) · [所有版本與更新說明](https://github.com/Chizakuraowob/obs-twitch-auto-category/releases)
+
 目前支援 **Windows 11 64 位元與 OBS Studio 32.2.2 64 位元官方安裝版**。MSI 會檢查 OBS 版本；其他版本與 OBS 可攜版尚不適用這個安裝方式。
 
 > **Windows 安全性限制：目前發布檔尚未數位簽章。** 智慧型應用程式控制（Smart App Control）可能封鎖外掛，造成 MSI 安裝成功但 OBS 無法載入。遇到這種情況請停止安裝／使用並回報；目前沒有已簽章的替代版本。安裝器不會關閉防護或安裝信任憑證。
 
-### 第一次安裝 MSI
+### 第一次安裝 Twitch 分類助手
 
 1. 確認已安裝上述版本的 OBS。可以在 OBS 的「說明 → 關於」查看版本。
 2. 結束直播與錄影，然後**完全關閉 OBS**。
-3. 前往 [Releases 下載頁](https://github.com/Chizakuraowob/obs-twitch-auto-category/releases/latest)，展開該版本的 **Assets**，下載 `twitch-category-assistant-版本號-windows-x64.msi`。一般使用者不需要下載 Source code 或名稱含 `source` 的檔案。
+3. 點上方「下載 Windows 安裝檔」並儲存檔案。安裝只需要這一個 `.msi`，不用另行下載原始碼或其他附件。
 4. 雙擊下載的 MSI，閱讀授權說明，依畫面同意並按「安裝」。若 Windows 要求管理員權限，請先核對檔案來自本專案，再決定是否允許。
 5. 若安裝器提示 OBS 正在執行，請關閉 OBS 後按「重試」。若不方便停止直播，可取消安裝，稍後再裝；安裝器不會替你強制關閉 OBS。
 6. 安裝完成後，可勾選「完成後啟動 OBS Studio」，或自行開啟 OBS。第一次啟動會顯示「Twitch 分類助手」面板與設定精靈。
