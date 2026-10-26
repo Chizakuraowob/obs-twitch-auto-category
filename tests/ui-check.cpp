@@ -7,6 +7,10 @@
 #include <QWizard>
 #include <QCheckBox>
 #include <QSpinBox>
+#include <QKeyEvent>
+#include <QLineEdit>
+#include <QLabel>
+#include <QMouseEvent>
 #include <QDialogButtonBox>
 #include <QEventLoop>
 #include <QComboBox>
@@ -50,6 +54,23 @@ struct DockTestAccess {
 };
 }
 
+static void typeSeconds(QSpinBox *spin, const QString &text)
+{
+    spin->setFocus(); spin->selectAll();
+    auto *edit = spin->findChild<QLineEdit *>();
+    for (auto c : text) {
+        QKeyEvent press(QEvent::KeyPress, c.unicode(), Qt::NoModifier, QString(c));
+        QKeyEvent release(QEvent::KeyRelease, c.unicode(), Qt::NoModifier, QString(c));
+        QApplication::sendEvent(edit, &press); QApplication::sendEvent(edit, &release);
+    }
+}
+static bool hasDelayHint(QWidget *widget)
+{
+    for (auto *text : widget->findChildren<QLabel *>())
+        if (text->text().contains("15–600 秒") && text->text().contains("10 分鐘")) return true;
+    return false;
+}
+
 int main(int argc, char **argv)
 {
     QApplication app(argc, argv);
@@ -87,8 +108,21 @@ int main(int argc, char **argv)
                 else size->setValue(18);
                 auto *delay = dialog->findChild<QSpinBox *>("chattingDelay");
                 if (!delay || delay->minimum() != 15 || delay->maximum() != 600) result = 41;
-                else delay->setValue(45);
-                dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Save)->click();
+                else {
+                    if (!hasDelayHint(dialog)) result = 48;
+                    for (const auto &input : {QString("15"), QString("600"), QString("120")}) {
+                        typeSeconds(delay, input);
+                        if (delay->value() != input.toInt()) result = 49;
+                    }
+                    // Exercise Save with an uncommitted edit, without Enter or focus loss.
+                    delay->setKeyboardTracking(false);
+                    typeSeconds(delay, "45");
+                }
+                auto *save = dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Save);
+                const QPointF pos(save->rect().center()), global(save->mapToGlobal(save->rect().center()));
+                QMouseEvent press(QEvent::MouseButtonPress, pos, global, Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+                QMouseEvent release(QEvent::MouseButtonRelease, pos, global, Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+                QApplication::sendEvent(save, &press); QApplication::sendEvent(save, &release);
                 if (tca::Settings::load(temp.filePath("settings.json"), &error).fontSize != 18) result = 14;
                 if (tca::Settings::load(temp.filePath("settings.json"), &error).chattingDelay != 45) result = 42;
             }
@@ -98,6 +132,8 @@ int main(int argc, char **argv)
             auto *wizard = qobject_cast<QWizard *>(app.activeModalWidget());
             if (!wizard) { result = 7; return; }
             auto *delay = wizard->findChild<QSpinBox *>("chattingDelay"); if (!delay || delay->value() != 45) result = 43;
+            if (!hasDelayHint(wizard)) result = 50;
+            if (delay) { typeSeconds(delay, "120"); if (delay->value() != 120) result = 51; }
             wizard->next(); wizard->next(); app.processEvents();
             if (wizard->button(QWizard::NextButton)->isEnabled()) result = 8;
             settle();
@@ -121,6 +157,7 @@ int main(int argc, char **argv)
         dock.resize(312, 442); app.processEvents();
         if (!dock.grab().save(output + "/dock-compact-large-font.png")) result = 18;
         dock.stop(); dock.hide();
+        if (app.arguments().contains("--delay-only")) { app.exit(result); return; }
         QTemporaryDir lightTemp; settings.theme = 1;
         if (!settings.save(lightTemp.filePath("settings.json"), &error)) result = 11;
         tca::Dock light(lightTemp.path()); light.resize(560, 900); light.show(); app.processEvents();

@@ -721,6 +721,7 @@ void Dock::settingsDialog()
     auto *clearCache = button("清除分類對應快取"); clearCache->setProperty("danger", true); detection->addWidget(clearCache);
     connect(clearCache, &QPushButton::clicked, &dialog, [this] { config.categoryCache.clear(); lookupAttempted.clear(); save(); setStatus("已清除本機分類對應；保留收藏與自訂程序規則"); });
     auto *chatting = new QCheckBox("遊戲結束後建議切換 Just Chatting"); chatting->setObjectName("chattingSuggestion"); chatting->setChecked(config.chattingSuggestion); detection->addWidget(chatting);
+    detection->addWidget(label("等待時間：15–600 秒（最長 10 分鐘）。請輸入範圍內的整數。"));
     auto *chattingDelay = new QSpinBox; chattingDelay->setObjectName("chattingDelay"); chattingDelay->setRange(15, 600); chattingDelay->setSuffix(" 秒"); chattingDelay->setValue(config.chattingDelay); chattingDelay->setEnabled(chatting->isChecked()); detection->addWidget(chattingDelay);
     connect(chatting, &QCheckBox::toggled, chattingDelay, &QWidget::setEnabled);
     detection->addWidget(label("從最後一款已確認遊戲的程序退出後計時。一般視窗不阻止倒數；只詢問，不自動切換。修改後重新計時。"));
@@ -777,6 +778,8 @@ void Dock::settingsDialog()
     buttons->button(QDialogButtonBox::Save)->setText("儲存"); buttons->button(QDialogButtonBox::Cancel)->setText("取消");
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     connect(buttons, &QDialogButtonBox::accepted, &dialog, [&] {
+        chattingDelay->interpretText();
+        fontSize->interpretText();
         const auto newId = id ? id->text().trimmed() : config.clientId;
         if (!QRegularExpression("^[a-zA-Z0-9]{0,128}$").match(newId).hasMatch()) { QMessageBox::warning(&dialog, "Client ID", "Client ID 只可包含英數字"); return; }
         if (newId != config.clientId) client.logout();
@@ -826,7 +829,7 @@ void Dock::wizard()
     auto *policy = page("分類更新策略", "預設每次詢問。自動模式只套用明確且穩定的映射，手動修改會暫停自動覆寫。");
     auto *autoUpdate = new QCheckBox("符合規則時自動更新"); autoUpdate->setChecked(config.automatic); policy->layout()->addWidget(autoUpdate);
     auto *chatting = new QCheckBox("遊戲結束後建議切換 Just Chatting"); chatting->setObjectName("chattingSuggestion"); chatting->setChecked(config.chattingSuggestion); policy->layout()->addWidget(chatting);
-    policy->layout()->addWidget(label("最後一款已確認遊戲退出後的等待時間；只提出建議，不自動切換。"));
+    policy->layout()->addWidget(label("等待時間：15–600 秒（最長 10 分鐘）。請輸入範圍內的整數。\n最後一款已確認遊戲退出後計時；只提出建議，不自動切換。"));
     auto *chattingDelay = new QSpinBox; chattingDelay->setObjectName("chattingDelay"); chattingDelay->setRange(15, 600); chattingDelay->setSuffix(" 秒"); chattingDelay->setValue(config.chattingDelay); chattingDelay->setEnabled(chatting->isChecked()); policy->layout()->addWidget(chattingDelay);
     connect(chatting, &QCheckBox::toggled, chattingDelay, &QWidget::setEnabled);
     auto *notice = page("通知偏好", "通知顯示於 OBS Dock。Windows 系統通知在此版本不支援。");
@@ -835,6 +838,7 @@ void Dock::wizard()
     page("完成設定", "完成後可搜尋分類，並在「我的遊戲」選取視窗與分類。你可以隨時在設定修改偏好或重新開啟精靈。");
     connect(&wizard, &QWizard::currentIdChanged, &wizard, [this, &wizard] { if (wizard.currentPage()) animate(wizard.currentPage()); });
     if (wizard.exec() == QDialog::Accepted) {
+        chattingDelay->interpretText();
         if (!agreeTerms->isChecked() || !agreePrivacy->isChecked() || !client.connected()) { setStatus("請先同意文件並完成 Twitch 登入"); return; }
         config.termsVersion = config.privacyVersion = DocumentVersion;
         config.termsUtc = config.privacyUtc = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
