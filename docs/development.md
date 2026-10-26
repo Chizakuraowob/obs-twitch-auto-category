@@ -2,7 +2,7 @@
 
 這份文件供作者與貢獻者使用。一般使用者請閱讀 [README](../README.md)。
 
-Windows 11 x64 原生 OBS Dock，C++17 / Qt Widgets；目前針對 OBS 32.2.2、Qt 6.11.1 建置。驗證狀態與限制見 [驗證紀錄](validation.md)。
+Windows 11 x64 原生 OBS Dock，C++17 / Qt Widgets；目前針對 OBS 32.2.2、Qt 6.11.1 建置。其他版本需自行驗證相容性。
 
 ## OAuth：由發佈者配置，一般使用者直接授權
 
@@ -60,7 +60,7 @@ Windows Smart App Control 會檢查被 OBS 載入的 DLL，不只 MSI。正式�
 # tca-ui-check：實際 Qt widgets、同意與登入必填、字級儲存與截圖
 ```
 
-實際 Twitch 測試必須由使用者在官方網站授權，不能由 Mock 測試代替。OBS 載入及 MSI 安裝也須另做實機驗證，見 [驗證紀錄](validation.md)。
+實際 Twitch 測試必須由使用者在官方網站授權，不能由 Mock 測試代替。OBS 載入與 MSI 安裝、升級、修復及解除安裝也須另做實機驗證。
 
 `tca-tls-check` 會在清除 SDK 的 Qt 插件搜尋路徑後檢查 TLS 封裝。需要實際測試取得 Twitch 授權網址時，將 OBS 的 `bin/64bit` 加入目前終端 PATH，再執行：
 
@@ -105,11 +105,11 @@ MSI 原生檢查工具不依賴 Qt，不發送關閉訊息或終止程序。`tca
 
 ## 自訂產品資訊
 
-MSI／DLL 名稱、作者、版號、修訂版號、描述與安裝文案請見 [產品資訊編輯指南](edit-release-metadata.md)。主要設定在根目錄 buildspec.json；更改後重新建置和封裝。
+MSI／DLL 名稱、作者、信箱、版權、描述與安裝文案設定在根目錄 `buildspec.json`；更改後重新建置和封裝。`version` 為三段產品版本（上限 `255.255.65535`），`revision` 為 DLL 四段版號的末段（0–65535）。新版 MSI 必須提高 `version`，只改 `revision` 不會觸發新版升級。不要變更 `name` 或安裝器的 UpgradeCode，以免影響既有設定與升級身分。MSI 的修訂編號是打包工具產生的 PackageCode GUID，不是 DLL 的 `revision`。
 
 ## CI、來源封裝與簽章
 
 GitHub 工作流程、作者端變數與草稿 Release 操作見 [ci-release.md](ci-release.md)。本機執行 `scripts/package-sources.ps1` 可收集已提交版本的對應來源、第三方來源、SBOM 及雜湊清單；工作目錄必須乾淨。
 
-[Code signing policy／免費簽章準備](code-signing.md) 記錄 SignPath 申請條件與第三方元件限制。目前未取得簽章，不在安裝器自動信任自簽憑證。
+目前未取得正式程式碼簽章，Smart App Control 可能封鎖外掛 DLL。安裝器不自動信任自簽憑證或變更系統防護；CI 建置成功不代表已相容 SAC。
 

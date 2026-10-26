@@ -150,12 +150,11 @@ Twitch 接受修改與外掛確認結果是兩個階段。請等讀回確認或�
 
 - [使用者條款](docs/terms.md) · [隱私權政策](docs/privacy.md)
 - [貢獻者](docs/contributors.md) · [第三方授權](docs/third-party.md) · [原始碼提供](docs/source-distribution.md)
-- [開發指南](docs/development.md) · [驗證紀錄](docs/validation.md) · [後續待辦](docs/backlog.md)
-- [Code signing policy](docs/code-signing.md) · [CI 與草稿發布](docs/ci-release.md)
+- [開發指南](docs/development.md) · [CI 與草稿發布](docs/ci-release.md)
 
 設定頁最下方可離線閱讀以上法律與貢獻資訊。公開發布前請確認文件內的維護者資訊與來源資產清單。
 
-作者：Chizakura（GitHub：Chizakuraowob）；聯絡信箱：admin@chizakura.dev。開發者若要更改安裝包／DLL 顯示資訊，請見 [產品資訊編輯指南](docs/edit-release-metadata.md)。
+作者：Chizakura（GitHub：Chizakuraowob）；聯絡信箱：admin@chizakura.dev。開發者若要更改安裝包／DLL 顯示資訊，請見 [開發指南](docs/development.md#自訂產品資訊)。
 
 ### 升級與設定保留（0.5.3）
 

@@ -19,4 +19,4 @@ Actions 預設只有 contents:read；只有手動草稿 job 有 contents:write�
 
 Release 的 MSI 名稱與 GitHub API SHA-256 digest 須符合既有更新器需求。作者公開 Release 後才會被 `/releases/latest` 偵測；草稿不對一般使用者提供。更新器仍由使用者關閉 OBS 後手動執行 MSI，不支援執行中替換 DLL。
 
-runner 參考：[GitHub 官方映像](https://github.com/actions/runner-images/blob/main/images/windows/Windows2025-VS2026-Readme.md)。免費簽章準備見 [code-signing.md](code-signing.md)。
+runner 參考：[GitHub 官方映像](https://github.com/actions/runner-images/blob/main/images/windows/Windows2025-VS2026-Readme.md)。目前未取得正式簽章，建置與草稿發布不代表已相容 Smart App Control。
