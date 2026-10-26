@@ -27,7 +27,7 @@ public:
     void logout();
     void shutdown();
     void search(const QString &query, const QString &cursor = {});
-    void readCurrent();
+    void readCurrent(bool announce = true);
     void resolveCategory(const QString &key, const QString &name);
     void apply(const Category &category);
     bool connected() const { return ready; }
@@ -35,6 +35,7 @@ public:
     bool readingCurrent() const { return reading; }
     QString userName() const { return loginName; }
     Category current() const { return currentCategory; }
+    QDateTime currentConfirmedAt() const { return confirmedAt; }
     static bool parseCategory(const QJsonObject &object, Category &category);
 signals:
     void accountChanged();
@@ -44,6 +45,7 @@ signals:
     void searchFinished();
     void currentChanged();
     void currentReadChanged();
+    void currentReadFinished(bool success);
     void categoryResolved(const QString &key, const tca::Category &category);
     void status(const QString &message, tca::Client::StatusLevel level = StatusLevel::Notice);
     void activity(const QString &message);
@@ -66,7 +68,7 @@ private:
     QString clientId, userId, loginName, deviceCode;
     Tokens tokens;
     Category currentCategory;
-    QDateTime deviceDeadline;
+    QDateTime deviceDeadline, confirmedAt;
     qint64 helixBlockedUntil = 0;
     quint64 generation = 0, searchGeneration = 0, updateGeneration = 0;
     int pollInterval = 5;

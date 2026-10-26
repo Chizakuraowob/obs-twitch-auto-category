@@ -18,6 +18,7 @@
 #include <QFontComboBox>
 #include <QGraphicsOpacityEffect>
 #include <QPropertyAnimation>
+#include <QVariantAnimation>
 #include <QPainter>
 #include <QStyle>
 #include <QScopedValueRollback>
@@ -76,6 +77,15 @@ static void indicator(QLabel *widget, const char *state, const QString &descript
 static QLabel *indicatorLight(const QString &name)
 {
     auto *light = label({}); light->setObjectName(name); light->setProperty("indicator", true); light->setFixedSize(10, 10); return light;
+}
+static QIcon rotationIcon(qreal angle, const QColor &color, qreal ratio)
+{
+    QPixmap icon(QSize(20, 20) * ratio); icon.setDevicePixelRatio(ratio); icon.fill(Qt::transparent);
+    QPainter painter(&icon); painter.setRenderHint(QPainter::Antialiasing); painter.translate(10, 10); painter.rotate(angle);
+    painter.setPen(QPen(color, 1.8, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    painter.drawArc(QRectF(-6, -6, 12, 12), 40 * 16, 290 * 16);
+    painter.drawLine(QPointF(5.2, 3), QPointF(6.2, -0.5)); painter.drawLine(QPointF(5.2, 3), QPointF(1.7, 2.7));
+    painter.end(); return QIcon(icon);
 }
 static QVBoxLayout *card(QVBoxLayout *parent, const QString &title)
 {
@@ -160,14 +170,19 @@ Dock::Dock(QString settingsDirectory, QWidget *parent, QNetworkAccessManager *tr
     auto *statusRow = new QHBoxLayout; statusIndicator = indicatorLight("statusIndicator"); statusLabel = label("連接 Twitch，開始管理分類"); statusLabel->setObjectName("operationStatus"); statusLabel->setAccessibleName("分類更新狀態");
     statusRow->addWidget(statusIndicator); statusRow->addWidget(statusLabel, 1); statusCard->addLayout(statusRow);
     indicator(statusIndicator, "notice", "等待連接 Twitch");
+    statusResetTimer.setSingleShot(true); statusResetTimer.setInterval(8000);
+    connect(&statusResetTimer, &QTimer::timeout, this, &Dock::restoreStatus);
     auto *current = card(layout, "目前直播分類"); current->parentWidget()->setObjectName("currentCategoryCard");
     auto *currentRow = new QHBoxLayout; currentArt = label("—"); currentArt->setFixedSize(42, 56);
     currentLabel = label("尚未取得"); currentRow->addWidget(currentArt); currentRow->addWidget(currentLabel, 1); current->addLayout(currentRow);
     syncLabel = label("尚未同步"); current->addWidget(syncLabel);
-    refreshButton = button("重新整理"); refreshButton->setObjectName("refreshCurrent"); current->addWidget(refreshButton); connect(refreshButton, &QPushButton::clicked, &client, &Client::readCurrent);
+    refreshButton = button("重新整理"); refreshButton->setObjectName("refreshCurrent"); current->addWidget(refreshButton); connect(refreshButton, &QPushButton::clicked, this, [this] { client.readCurrent(); });
     refreshTimer.setInterval(80);
     connect(&refreshTimer, &QTimer::timeout, this, [this] { refreshAngle = (refreshAngle + 30) % 360; updateRefresh(); });
-    connect(&client, &Client::currentReadChanged, this, &Dock::updateRefresh);
+    connect(&client, &Client::currentReadChanged, this, [this] { updateRefresh(); if (!statusResetTimer.isActive()) restoreStatus(); });
+    connect(&client, &Client::currentReadFinished, this, [this](bool success) { categorySyncFailed = !success; if (!statusResetTimer.isActive()) restoreStatus(); });
+    currentSyncTimer.setInterval(30000);
+    connect(&currentSyncTimer, &QTimer::timeout, this, [this] { if (!stopped && config.consented()) client.readCurrent(false); });
     auto *favorites = card(layout, "我的最愛");
     favoriteChoice = new QComboBox; favoriteChoice->setObjectName("favoriteChoice"); favoriteChoice->setAccessibleName("收藏的 Twitch 分類"); favorites->addWidget(favoriteChoice);
     favoriteChoice->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon); favoriteChoice->setMinimumContentsLength(12);
@@ -179,12 +194,16 @@ Dock::Dock(QString settingsDirectory, QWidget *parent, QNetworkAccessManager *tr
     connect(favoriteApply, &QPushButton::clicked, this, [this] {
         const int row = favoriteChoice->currentIndex();
         if (row < 0 || row >= config.favorites.size() || !client.connected() || client.busy() || !config.consented()) return;
-        const auto f = config.favorites[row]; manualOverride = true; resumeButton->show();
+        const auto f = config.favorites[row]; manualOverride = true;
         addActivity("手動套用收藏：" + f.name); client.apply({f.id, f.name, {}});
     });
     connect(favoriteRemove, &QPushButton::clicked, this, [this] {
         const int row = favoriteChoice->currentIndex(); if (row < 0 || row >= config.favorites.size()) return;
-        config.favorites.removeAt(row); save(); refreshFavorites();
+        if (favoriteRemove->property("favoriteFeedback").toBool()) return;
+        const auto previous = config.favorites; const auto name = config.favorites[row].name; config.favorites.removeAt(row);
+        if (!save()) { config.favorites = previous; refreshFavorites(); return; }
+        refreshFavorites(); favoriteFeedback(favoriteRemove, "已移除");
+        setStatus("已移除收藏：" + name, Client::StatusLevel::Success); addActivity("已移除收藏：" + name);
     });
     auto *search = card(layout, "搜尋 Twitch 分類"); search->parentWidget()->setObjectName("manualSearchCard"); searchInput = new QLineEdit; searchInput->setObjectName("categorySearchInput"); searchInput->setPlaceholderText("輸入遊戲或分類名稱…"); searchInput->setMaxLength(200);
     searchInput->setAccessibleName("搜尋遊戲或分類"); search->addWidget(searchInput);
@@ -198,8 +217,11 @@ Dock::Dock(QString settingsDirectory, QWidget *parent, QNetworkAccessManager *tr
         const auto c = searchCategories[row];
         for (const auto &f : config.favorites) if (f.id == c.id) return;
         if (config.favorites.size() >= 100) { setStatus("我的最愛已達 100 筆，請先移除不需要的收藏"); return; }
-        config.favorites.append({c.id, c.name}); save(); refreshFavorites(); favoriteChoice->setCurrentIndex(config.favorites.size() - 1);
-        setStatus("已收藏：" + c.name, Client::StatusLevel::Success);
+        if (favoriteAdd->property("favoriteFeedback").toBool()) return;
+        const auto previous = config.favorites; config.favorites.append({c.id, c.name});
+        if (!save()) { config.favorites = previous; refreshFavorites(); return; }
+        refreshFavorites(); favoriteChoice->setCurrentIndex(config.favorites.size() - 1); favoriteFeedback(favoriteAdd, "收藏加入成功");
+        setStatus("已收藏：" + c.name, Client::StatusLevel::Success); addActivity("已收藏：" + c.name);
     });
     moreButton = button("載入更多"); moreButton->hide(); search->addWidget(moreButton);
     mappingButton = button("＋ 記住正在玩的遊戲"); mappingButton->setProperty("link", true); search->addWidget(mappingButton);
@@ -244,14 +266,15 @@ Dock::Dock(QString settingsDirectory, QWidget *parent, QNetworkAccessManager *tr
     suggestionChoice = new QComboBox; suggestion->addWidget(suggestionChoice);
     suggestionApply = button("套用建議"); suggestion->addWidget(suggestionApply); connect(suggestionApply, &QPushButton::clicked, this, &Dock::applySuggestion);
     suggestionApply->setProperty("primary", true);
-    ignoreButton = button("略過這次建議"); ignoreButton->setProperty("link", true); suggestion->addWidget(ignoreButton);
+    ignoreButton = button("本次遊戲不再提醒"); ignoreButton->setProperty("link", true); ignoreButton->setToolTip("略過上方選取的建議，不更改 Twitch 分類；同次遊戲執行期間不再提醒。"); suggestion->addWidget(ignoreButton);
     connect(ignoreButton, &QPushButton::clicked, this, [this] {
         const auto id = suggestionChoice->currentData().toString(); if (!id.isEmpty()) ignored.insert(id);
         for (const auto &candidate : detected) if (candidate.id == id) suggestionSession.handled.insert(suggestionKey(candidate));
         if (suggestionPrompt) suggestionPrompt->close(); processScan();
     });
-    resumeButton = button("恢復自動分類"); resumeButton->hide(); suggestion->addWidget(resumeButton);
-    connect(resumeButton, &QPushButton::clicked, this, [this] { manualOverride = false; suggestionSession.handled.clear(); autoAttemptKey.clear(); stableKey.clear(); resumeButton->hide(); });
+    resumeHint = label("你已手動選擇分類，自動切換已暫停。"); resumeHint->setObjectName("resumeCategoryHint"); resumeHint->setProperty("role", "muted"); resumeHint->hide(); suggestion->addWidget(resumeHint);
+    resumeButton = button("恢復自動切換分類"); resumeButton->setObjectName("resumeAutoCategory"); resumeButton->setToolTip("重新允許外掛依設定的遊戲規則自動切換 Twitch 分類。"); resumeButton->hide(); suggestion->addWidget(resumeButton);
+    connect(resumeButton, &QPushButton::clicked, this, [this] { manualOverride = false; suggestionSession.handled.clear(); autoAttemptKey.clear(); stableKey.clear(); updateAccount(); setStatus("已恢復自動切換分類", Client::StatusLevel::Success); });
     layout->removeWidget(search->parentWidget()); layout->addWidget(search->parentWidget());
     activityToggle = button("最近活動 · 0  ▸"); activityToggle->setProperty("link", true); activityToggle->setCheckable(true); layout->addWidget(activityToggle);
     activityList = new QListWidget; activityList->setMaximumHeight(140); activityList->setWordWrap(true); activityList->hide(); layout->addWidget(activityList);
@@ -270,6 +293,7 @@ Dock::Dock(QString settingsDirectory, QWidget *parent, QNetworkAccessManager *tr
     });
     connect(&client, &Client::accountChanged, this, [this] {
         lookupPending = false; lookupAttempted.clear();
+        if (client.connected()) currentSyncTimer.start(); else { currentSyncTimer.stop(); categorySyncFailed = false; }
         searchTimer.stop();
         searchHint->setText(client.connected() ? "輸入名稱即可搜尋，也可按 Enter 立即查詢" : "連接 Twitch 後即可搜尋與更新分類");
     });
@@ -298,7 +322,7 @@ Dock::Dock(QString settingsDirectory, QWidget *parent, QNetworkAccessManager *tr
     connect(&client, &Client::currentChanged, this, [this] {
         const auto c = client.current(); currentLabel->setText(c.name.isEmpty() ? (client.connected() ? "未設定分類" : "尚未取得") : c.name);
         currentArt->clear(); currentArt->setText("—"); currentArt->setVisible(client.connected());
-        syncLabel->setText(client.connected() ? "最後確認：" + QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss") : "未同步"); fetchArt(c);
+        syncLabel->setText(client.connected() && client.currentConfirmedAt().isValid() ? "最後確認：" + client.currentConfirmedAt().toLocalTime().toString("yyyy-MM-dd HH:mm:ss") : "未同步"); fetchArt(c);
     });
     connect(&watcher, &QFutureWatcher<Processes>::finished, this, &Dock::processScan);
     connect(&scanTimer, &QTimer::timeout, this, &Dock::scan); scanTimer.start(3000);
@@ -320,12 +344,32 @@ void Dock::beginFirstRun()
         else if (!config.consented() && confirmUpdatedDocuments()) client.restore(effectiveClientId());
     });
 }
-void Dock::setStatus(const QString &message, Client::StatusLevel level)
+void Dock::setStatus(const QString &message, Client::StatusLevel level, bool temporary)
 {
     const char *state = level == Client::StatusLevel::Success ? "success" : level == Client::StatusLevel::Error ? "error" : "notice";
     const QString meaning = level == Client::StatusLevel::Success ? "正常" : level == Client::StatusLevel::Error ? "錯誤" : level == Client::StatusLevel::Progress ? "處理中" : "需注意";
     indicator(statusIndicator, state, meaning + "：" + message);
     if (statusLabel->text() != message) { statusLabel->setText(message); animate(statusLabel); }
+    if (temporary) statusResetTimer.start(); else statusResetTimer.stop();
+}
+void Dock::restoreStatus()
+{
+    if (stopped) return;
+    QString message; auto level = Client::StatusLevel::Notice;
+    if (settingsReadError) { message = "設定讀取失敗，請開啟設定還原備份"; level = Client::StatusLevel::Error; }
+    else if (accountConnecting) message = "正在連接 Twitch…";
+    else if (!client.connected()) message = "尚未連接 Twitch，請至設定連接帳號";
+    else if (!config.consented()) message = "請確認更新文件後繼續使用 Twitch";
+    else if (client.busy()) message = "正在更新 Twitch 分類…";
+    else if (client.readingCurrent()) message = "正在同步目前分類…";
+    else if (searching) message = "正在搜尋 Twitch 分類…";
+    else if (categorySyncFailed) { message = "分類同步暫時失敗，稍後會重試"; level = Client::StatusLevel::Error; }
+    else if (manualOverride && config.automatic) message = "已連接 Twitch · 手動選擇後暫停自動切換";
+    else if (!config.autoDetect || config.paused) message = "已連接 Twitch · 自動偵測已暫停";
+    else if (config.developerMode) message = "已連接 Twitch · 開發者模式只在本機預演";
+    else if (config.liveOnly && !streaming) { message = "已連接 Twitch · 尚未開播，手動分類可用"; level = Client::StatusLevel::Success; }
+    else { message = "已連接 Twitch · 遊戲偵測中"; level = Client::StatusLevel::Success; }
+    setStatus(message, level, false);
 }
 void Dock::updateRefresh()
 {
@@ -336,12 +380,7 @@ void Dock::updateRefresh()
     if (active && config.animations && QApplication::style()->styleHint(QStyle::SH_Widget_Animate)) {
         if (!refreshTimer.isActive()) refreshTimer.start();
     } else { refreshTimer.stop(); refreshAngle = 0; }
-    const auto ratio = devicePixelRatioF(); QPixmap icon(QSize(20, 20) * ratio); icon.setDevicePixelRatio(ratio); icon.fill(Qt::transparent);
-    QPainter painter(&icon); painter.setRenderHint(QPainter::Antialiasing); painter.translate(10, 10); painter.rotate(refreshAngle);
-    painter.setPen(QPen(palette().color(QPalette::WindowText), 1.8, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-    painter.drawArc(QRectF(-6, -6, 12, 12), 40 * 16, 290 * 16);
-    painter.drawLine(QPointF(5.2, 3), QPointF(6.2, -0.5)); painter.drawLine(QPointF(5.2, 3), QPointF(1.7, 2.7));
-    painter.end(); refreshButton->setIcon(QIcon(icon));
+    refreshButton->setIcon(rotationIcon(refreshAngle, palette().color(QPalette::WindowText), devicePixelRatioF()));
 }
 void Dock::animate(QWidget *widget)
 {
@@ -356,7 +395,7 @@ Dock::~Dock() { stop(); }
 void Dock::stop()
 {
     if (stopped) return;
-    stopped = true; scanTimer.stop(); refreshTimer.stop(); searchTimer.stop(); client.shutdown(); updater.cancel();
+    stopped = true; scanTimer.stop(); refreshTimer.stop(); searchTimer.stop(); statusResetTimer.stop(); currentSyncTimer.stop(); client.shutdown(); updater.cancel();
     if (suggestionPrompt) suggestionPrompt->close();
 
     watcher.disconnect(this); watcher.waitForFinished();
@@ -385,14 +424,16 @@ void Dock::updateAccount()
     suggestionApply->setEnabled((allowed || config.developerMode) && suggestionChoice->currentIndex() >= 0);
     suggestionApply->setText(config.developerMode ? "預演套用建議（不更新 Twitch）" : "套用建議");
     favoriteApply->setEnabled(allowed && !config.favorites.isEmpty());
-    favoriteRemove->setEnabled(!config.favorites.isEmpty());
+    if (!favoriteRemove->property("favoriteFeedback").toBool()) favoriteRemove->setEnabled(!config.favorites.isEmpty());
     const int selected = searchList->currentRow();
     bool saved = false;
     if (selected >= 0 && selected < searchCategories.size())
         for (const auto &f : config.favorites) if (f.id == searchCategories[selected].id) saved = true;
-    favoriteAdd->setVisible(selected >= 0 && selected < searchCategories.size());
-    favoriteAdd->setEnabled(!saved);
-    favoriteAdd->setText(saved ? "已加入我的最愛" : "加入我的最愛");
+    if (!favoriteAdd->property("favoriteFeedback").toBool()) {
+        favoriteAdd->setVisible(selected >= 0 && selected < searchCategories.size());
+        favoriteAdd->setEnabled(!saved);
+        favoriteAdd->setText(saved ? "已加入我的最愛" : "加入我的最愛");
+    }
     updateRefresh();
     searchInput->setEnabled(client.connected());
     currentArt->setVisible(client.connected());
@@ -404,7 +445,24 @@ void Dock::updateAccount()
     linkLocalGame->setEnabled(selected >= 0 && selected < searchCategories.size() && localGameChoice->currentIndex() >= 0);
     const bool hasSuggestion = suggestionChoice->count() > 0;
     suggestionChoice->setVisible(hasSuggestion); suggestionApply->setVisible(hasSuggestion); ignoreButton->setVisible(hasSuggestion);
+    resumeButton->setVisible(manualOverride && config.automatic); resumeHint->setVisible(manualOverride && config.automatic);
     if (!client.connected()) { searchCategories.clear(); searchList->clear(); searchList->setFixedHeight(90); moreButton->hide(); applyButton->hide(); mappingButton->hide(); }
+    if (!statusResetTimer.isActive()) restoreStatus();
+}
+void Dock::favoriteFeedback(QPushButton *target, const QString &message)
+{
+    target->setProperty("favoriteFeedback", true); target->setEnabled(false); target->setText("處理中…");
+    auto complete = [this, target, message] {
+        target->setIcon({}); target->setText(message); animate(target);
+        QTimer::singleShot(1600, target, [this, target] {
+            target->setProperty("favoriteFeedback", false); updateAccount();
+            if (target == favoriteRemove) target->setText("移除收藏");
+        });
+    };
+    if (!config.animations || !QApplication::style()->styleHint(QStyle::SH_Widget_Animate)) { complete(); return; }
+    auto *spin = new QVariantAnimation(target); spin->setObjectName("favoriteSpin"); spin->setDuration(700); spin->setStartValue(0.0); spin->setEndValue(720.0); spin->setEasingCurve(QEasingCurve::InOutCubic);
+    connect(spin, &QVariantAnimation::valueChanged, target, [this, target](const QVariant &angle) { target->setIcon(rotationIcon(angle.toReal(), target->palette().color(QPalette::ButtonText), devicePixelRatioF())); });
+    connect(spin, &QVariantAnimation::finished, target, complete); spin->start(QAbstractAnimation::DeleteWhenStopped);
 }
 void Dock::refreshFavorites()
 {
@@ -424,7 +482,7 @@ void Dock::addActivity(const QString &text)
 void Dock::applySelected()
 {
     const int row = searchList->currentRow(); if (row < 0 || row >= searchCategories.size() || !config.consented()) return;
-    manualOverride = true; resumeButton->show(); addActivity("手動套用：" + searchCategories[row].name); client.apply(searchCategories[row]);
+    manualOverride = true; addActivity("手動套用：" + searchCategories[row].name); client.apply(searchCategories[row]);
 }
 void Dock::applySuggestion()
 {
@@ -486,7 +544,7 @@ void Dock::updateUnknown(const Processes &processes)
         if (!known) pendingWindow = w;
     }
     reviewUnknownButton->setEnabled(true);
-    unknownLabel->setText(pendingWindow.executable.isEmpty() ? "開啟遊戲後按「手動新增遊戲偵測」，確認一次即可記住。" : "未確認視窗（不影響聊天倒數）：" + pendingWindow.title.left(120));
+    unknownLabel->setText(pendingWindow.executable.isEmpty() ? "開啟遊戲後按「手動新增遊戲偵測」，確認一次即可記住。" : "未確認視窗：" + pendingWindow.title.left(120));
 }
 bool Dock::rememberRecognition(const RecognitionRule &rule)
 {
@@ -898,7 +956,7 @@ void Dock::settingsDialog()
     auto *learn = new QCheckBox("在面板顯示未確認視窗（不彈窗）"); learn->setChecked(config.learnUnknown); detection->addWidget(learn);
     detection->addWidget(label("本機比對程序、視窗類別與路徑指紋；路徑不可讀時使用你確認的標題。啟動器資訊只作線索，未確認不會自動更新。"));
     auto *learned = button("我的遊戲…"); detection->addWidget(learned); connect(learned, &QPushButton::clicked, this, &Dock::recognitionDialog);
-    auto *lookup = new QCheckBox("向 Twitch 查詢遊戲名稱（聯網）"); lookup->setChecked(config.allowCategoryLookup); detection->addWidget(lookup);
+    auto *lookup = new QCheckBox("向 Twitch 查詢遊戲名稱（聯網）"); lookup->setObjectName("allowCategoryLookup"); lookup->setChecked(config.allowCategoryLookup); detection->addWidget(lookup);
     detection->addWidget(label("預設不傳送偵測資料。啟用後只向 Twitch 傳送正在執行的遊戲名稱與 OAuth 必要資訊；不傳送程序／路徑／完整遊戲庫。僅採用唯一同名分類，結果保存在本機。"));
     auto *clearCache = button("清除分類對應快取"); clearCache->setProperty("danger", true); detection->addWidget(clearCache);
     connect(clearCache, &QPushButton::clicked, &dialog, [this] { config.categoryCache.clear(); lookupAttempted.clear(); save(); setStatus("已清除本機分類對應；保留收藏與自訂程序規則"); });
@@ -1090,6 +1148,8 @@ void Dock::wizard()
     });
     auto *policy = page("分類更新策略", "預設每次詢問。自動模式只套用明確且穩定的映射，手動修改會暫停自動覆寫。");
     auto *autoUpdate = new QCheckBox("符合規則時自動更新"); autoUpdate->setChecked(config.automatic); policy->layout()->addWidget(autoUpdate);
+    auto *lookup = new QCheckBox("向 Twitch 查詢遊戲名稱（聯網）"); lookup->setObjectName("allowCategoryLookup"); lookup->setChecked(config.allowCategoryLookup); policy->layout()->addWidget(lookup);
+    policy->layout()->addWidget(label("預設關閉。啟用後，會將偵測到的遊戲名稱送到 Twitch 尋找分類；不傳送程序路徑、視窗標題或完整遊戲庫。"));
     auto *chatting = new QCheckBox("遊戲結束後建議切換 Just Chatting"); chatting->setObjectName("chattingSuggestion"); chatting->setChecked(config.chattingSuggestion); policy->layout()->addWidget(chatting);
     policy->layout()->addWidget(label("等待時間：15–600 秒（最長 10 分鐘）。請輸入範圍內的整數。\n最後一款已確認遊戲退出後計時；只提出建議，不自動切換。"));
     auto *chattingDelay = new QSpinBox; chattingDelay->setObjectName("chattingDelay"); chattingDelay->setRange(15, 600); chattingDelay->setSuffix(" 秒"); chattingDelay->setValue(config.chattingDelay); chattingDelay->setEnabled(chatting->isChecked()); policy->layout()->addWidget(chattingDelay);
@@ -1106,7 +1166,7 @@ void Dock::wizard()
         const auto previous = config;
         config.termsVersion = config.privacyVersion = DocumentVersion;
         config.termsUtc = config.privacyUtc = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
-        config.chattingSuggestion = chatting->isChecked(); config.chattingDelay = chattingDelay->value(); suggestionSession.pause(); config.automatic = autoUpdate->isChecked(); config.notifications = notify->isChecked(); config.quietMode = quiet->isChecked(); config.liveOnly = live->isChecked(); config.wizardDone = true;
+        config.chattingSuggestion = chatting->isChecked(); config.chattingDelay = chattingDelay->value(); suggestionSession.pause(); config.automatic = autoUpdate->isChecked(); config.allowCategoryLookup = lookup->isChecked(); lookupAttempted.clear(); config.notifications = notify->isChecked(); config.quietMode = quiet->isChecked(); config.liveOnly = live->isChecked(); config.wizardDone = true;
         if (!save()) { config = previous; setStatus("無法儲存設定，尚未標記設定完成。", Client::StatusLevel::Error); }
         updateAccount();
     }

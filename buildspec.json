@@ -42,7 +42,7 @@
   },
   "name": "twitch-category-assistant",
   "displayName": "Twitch Category Assistant",
-  "version": "0.5.6",
+  "version": "0.5.7",
   "author": "Chizakura",
   "website": "https://github.com/Chizakuraowob/obs-twitch-auto-category",
   "email": "admin@chizakura.dev",

@@ -36,6 +36,7 @@
 #include <QStyle>
 #include <QThread>
 #include <QDesktopServices>
+#include <QVariantAnimation>
 #include <cstring>
 
 class AuthorizationBrowserSink : public QObject {
@@ -68,14 +69,14 @@ private:
 };
 class UiTransport : public QNetworkAccessManager {
 public:
-    QString clientId; int searches = 0, reads = 0; bool failRead = false, unexpected = false;
+    QString clientId, channelId = "42", channelName = "Minecraft"; int searches = 0, reads = 0; bool failRead = false, unexpected = false;
 protected:
     QNetworkReply *createRequest(Operation, const QNetworkRequest &request, QIODevice *) override {
         const auto path = request.url().path(); QByteArray body; int status = 200, delay = 0;
         if (path == "/oauth2/device") body = R"({"device_code":"fixture","user_code":"TEST","verification_uri":"https://www.twitch.tv/activate","interval":5,"expires_in":60})";
         else if (path == "/oauth2/token") body = R"({"access_token":"fixture-access","refresh_token":"fixture-refresh","token_type":"bearer"})";
         else if (path == "/oauth2/validate") body = QJsonDocument(QJsonObject{{"client_id", clientId}, {"user_id", "123"}, {"login", "fixture_streamer"}, {"scopes", QJsonArray{"channel:manage:broadcast"}}, {"expires_in", 3600}}).toJson();
-        else if (path == "/helix/channels") { ++reads; delay = 300; status = failRead ? 503 : 200; body = R"({"data":[{"broadcaster_id":"123","game_id":"42","game_name":"Minecraft"}]})"; }
+        else if (path == "/helix/channels") { ++reads; delay = 300; status = failRead ? 503 : 200; body = QJsonDocument(QJsonObject{{"data", QJsonArray{QJsonObject{{"broadcaster_id", "123"}, {"game_id", channelId}, {"game_name", channelName}}}}}).toJson(); }
         else if (path == "/helix/search/categories") { ++searches; delay = 180; body = R"({"data":[{"id":"42","name":"Minecraft","box_art_url":""}],"pagination":{}})"; }
         else if (path == "/helix/games" || path == "/oauth2/revoke") body = R"({"data":[]})";
         else { unexpected = true; status = 500; body = "{}"; }
@@ -96,6 +97,22 @@ struct DockTestAccess {
     static void noAnimation(Dock &dock) { dock.config.animations = false; dock.theme(); }
     static bool refreshAnimating(Dock &dock) { return dock.refreshTimer.isActive(); }
     static bool searching(Dock &dock) { return dock.searching; }
+    static int favoriteCount(Dock &dock) { return dock.config.favorites.size(); }
+    static bool expireStatusSoon(Dock &dock) {
+        if (dock.statusResetTimer.interval() != 8000) return false;
+        dock.setStatus("temporary fixture status", Client::StatusLevel::Success); dock.statusResetTimer.setInterval(10); return true;
+    }
+    static void normalStatusInterval(Dock &dock) { dock.statusResetTimer.setInterval(8000); }
+    static void statusFixture(Dock &dock) { dock.setStatus("do not replace this notification", Client::StatusLevel::Success); }
+    static int syncInterval(Dock &dock) { return dock.currentSyncTimer.interval(); }
+    static void syncInterval(Dock &dock, int interval) { dock.currentSyncTimer.setInterval(interval); }
+    static bool resumeControls(Dock &dock) {
+        dock.manualOverride = true; dock.config.automatic = false; dock.updateAccount();
+        if (!dock.resumeButton->isHidden() || !dock.resumeHint->isHidden()) return false;
+        dock.config.automatic = true; dock.updateAccount();
+        const bool shown = !dock.resumeButton->isHidden() && !dock.resumeHint->isHidden();
+        dock.manualOverride = false; dock.config.automatic = false; dock.updateAccount(); return shown;
+    }
     static bool quietPrompt(Dock &dock, bool quiet, bool idle, const QString &path) {
         const bool previous = dock.config.quietMode; dock.config.quietMode = quiet;
         dock.notifySuggestion({idle ? "@idle" : "fixture.exe", idle ? "509658" : "42", idle ? "Just Chatting" : "Minecraft", 0});
@@ -184,7 +201,7 @@ struct DockTestAccess {
         dock.updateUnknown(snapshot);
         dock.updateUnknown(snapshot);
         if (dock.pendingWindow.executable != window.executable) return false;
-        return !dock.findChild<QMessageBox *>("unknownGamePrompt");
+        return !dock.findChild<QMessageBox *>("unknownGamePrompt") && !dock.unknownLabel->text().contains("不影響聊天倒數");
     }
     static void review(Dock &dock, const WindowEvidence &window) {
         dock.config.developerMode = true;
@@ -235,6 +252,17 @@ static bool connectedUi(const QString &output)
     UI_CHECK(dock.findChild<QLabel *>("accountName")->text().contains("fixture_streamer"));
     UI_CHECK(dock.findChild<QPushButton *>("connectAccount")->isHidden());
     UI_CHECK(tca::DockTestAccess::pausedCopy(dock));
+    UI_CHECK(tca::DockTestAccess::expireStatusSoon(dock));
+    UI_CHECK(wait([&] { return dock.findChild<QLabel *>("operationStatus")->text() != "temporary fixture status"; }));
+    tca::DockTestAccess::normalStatusInterval(dock);
+    UI_CHECK(tca::DockTestAccess::resumeControls(dock));
+    UI_CHECK(tca::DockTestAccess::syncInterval(dock) == 30000);
+    tca::DockTestAccess::statusFixture(dock); network.channelId = "77"; network.channelName = "External category";
+    tca::DockTestAccess::syncInterval(dock, 10);
+    UI_CHECK(wait([&] { return client.current().id == "77"; }));
+    tca::DockTestAccess::syncInterval(dock, 30000);
+    UI_CHECK(dock.findChild<QLabel *>("operationStatus")->text() == "do not replace this notification" && client.currentConfirmedAt().isValid());
+    network.channelId = "42"; network.channelName = "Minecraft"; client.readCurrent(false); UI_CHECK(wait([&] { return !client.readingCurrent(); }));
     auto *input = dock.findChild<QLineEdit *>("categorySearchInput");
     UI_CHECK(input && !dock.findChild<QPushButton *>("categorySearchButton"));
     auto *manual = dock.findChild<QPushButton *>("reviewUnknownGame");
@@ -257,6 +285,26 @@ static bool connectedUi(const QString &output)
     input->setText("Minecraft"); QApplication::sendEvent(input, &enter);
     UI_CHECK(network.searches == 4); UI_CHECK(wait([&] { return !tca::DockTestAccess::searching(dock); }));
     settle(450); UI_CHECK(network.searches == 4);
+    auto *removeFavorite = dock.findChild<QPushButton *>("favoriteRemove"); UI_CHECK(removeFavorite && removeFavorite->isEnabled());
+    removeFavorite->click(); removeFavorite->click();
+    UI_CHECK(tca::Settings::load(temp.filePath("settings.json"), &error).favorites.isEmpty());
+    auto *removeSpin = removeFavorite->findChild<QVariantAnimation *>("favoriteSpin");
+    UI_CHECK(!QApplication::style()->styleHint(QStyle::SH_Widget_Animate) || (removeSpin && removeSpin->endValue().toReal() == 720.0));
+    UI_CHECK(wait([&] { return removeFavorite->text() == "已移除"; }));
+    UI_CHECK(!removeFavorite->isEnabled());
+    auto *results = dock.findChild<QListWidget *>("searchResults"); results->setCurrentRow(0);
+    auto *addFavorite = dock.findChild<QPushButton *>("favoriteAdd"); UI_CHECK(addFavorite && addFavorite->isEnabled());
+    addFavorite->click(); addFavorite->click();
+    UI_CHECK(tca::Settings::load(temp.filePath("settings.json"), &error).favorites.size() == 1);
+    UI_CHECK(wait([&] { return addFavorite->text() == "收藏加入成功"; }));
+    UI_CHECK(!addFavorite->isEnabled());
+    QTemporaryDir failedSave; tca::Settings original; original.favorites = {{"42", "Keep this favorite"}};
+    const auto brokenPath = failedSave.filePath("settings.json"); UI_CHECK(original.save(brokenPath, &error));
+    tca::Dock failedFavorite(failedSave.path());
+    { QFile file(brokenPath); UI_CHECK(file.open(QIODevice::WriteOnly | QIODevice::Truncate)); UI_CHECK(file.write("{broken") == 7); }
+    failedFavorite.findChild<QPushButton *>("favoriteRemove")->click();
+    UI_CHECK(tca::DockTestAccess::favoriteCount(failedFavorite) == 1 && failedFavorite.findChild<QPushButton *>("favoriteRemove")->text() != "已移除");
+    failedFavorite.stop();
     auto *refresh = dock.findChild<QPushButton *>("refreshCurrent"); UI_CHECK(refresh && refresh->isEnabled());
     const auto reads = network.reads; refresh->click(); refresh->click();
     UI_CHECK(network.reads == reads + 1 && refresh->property("refreshing").toBool() && !refresh->isEnabled());
@@ -287,6 +335,8 @@ static bool connectedUi(const QString &output)
     QTimer::singleShot(100, &dock, [&] {
         auto *wizard = qobject_cast<QWizard *>(QApplication::activeModalWidget()); if (!wizard) return;
         auto *quiet = wizard->findChild<QCheckBox *>("quietMode"); if (!quiet) { wizard->reject(); return; }
+        auto *lookup = wizard->findChild<QCheckBox *>("allowCategoryLookup"); if (!lookup) { wizard->reject(); return; }
+        lookup->setChecked(true);
         quiet->setChecked(true);
         for (int i = 0; i < 6; ++i) {
             if (wizard->currentId() == 2) for (auto *box : wizard->currentPage()->findChildren<QCheckBox *>()) box->setChecked(true);
@@ -297,10 +347,12 @@ static bool connectedUi(const QString &output)
         if (quietSaved) wizard->button(QWizard::FinishButton)->click(); else wizard->reject();
     });
     settingsButton->click();
-    UI_CHECK(quietSaved && tca::Settings::load(temp.filePath("settings.json"), &error).quietMode);
+    const auto wizardSettings = tca::Settings::load(temp.filePath("settings.json"), &error);
+    UI_CHECK(quietSaved && wizardSettings.quietMode && wizardSettings.allowCategoryLookup);
     UI_CHECK(tca::DockTestAccess::quietPrompt(dock, true, false, output + "/quiet-suggestion.png"));
     UI_CHECK(tca::DockTestAccess::quietPrompt(dock, true, true, {}));
     UI_CHECK(tca::DockTestAccess::quietPrompt(dock, false, false, {}));
+    UI_CHECK(wait([&] { return !addFavorite->property("favoriteFeedback").toBool() && !removeFavorite->property("favoriteFeedback").toBool(); }, 2500));
     settle(160); UI_CHECK(tca::DockTestAccess::preview(dock, output + "/connected-dark.png"));
     tca::DockTestAccess::lightTheme(dock); settle(160); UI_CHECK(tca::DockTestAccess::preview(dock, output + "/connected-light.png"));
     network.failRead = true; refresh->click(); UI_CHECK(wait([&] { return !client.readingCurrent(); }));
@@ -407,6 +459,8 @@ int main(int argc, char **argv)
                 auto *size = dialog->findChild<QSpinBox *>("fontSize");
                 auto *quiet = dialog->findChild<QCheckBox *>("quietMode");
                 if (!quiet || quiet->isChecked()) result = 81; else quiet->setChecked(true);
+                auto *lookup = dialog->findChild<QCheckBox *>("allowCategoryLookup");
+                if (!lookup || lookup->isChecked()) result = 84; else lookup->setChecked(true);
                 if (!size) result = 13;
                 else size->setValue(18);
                 auto *delay = dialog->findChild<QSpinBox *>("chattingDelay");
@@ -429,6 +483,7 @@ int main(int argc, char **argv)
                 if (tca::Settings::load(temp.filePath("settings.json"), &error).fontSize != 18) result = 14;
                 if (tca::Settings::load(temp.filePath("settings.json"), &error).chattingDelay != 45) result = 42;
                 if (!tca::Settings::load(temp.filePath("settings.json"), &error).quietMode) result = 82;
+                if (!tca::Settings::load(temp.filePath("settings.json"), &error).allowCategoryLookup) result = 85;
             }
         });
         settingsButton->click();
@@ -440,6 +495,7 @@ int main(int argc, char **argv)
             auto *wizard = qobject_cast<QWizard *>(app.activeModalWidget());
             if (!wizard) { result = 7; return; }
             auto *quiet = wizard->findChild<QCheckBox *>("quietMode"); if (!quiet || !quiet->isChecked()) result = 83;
+            auto *lookup = wizard->findChild<QCheckBox *>("allowCategoryLookup"); if (!lookup || !lookup->isChecked()) result = 86;
             auto *delay = wizard->findChild<QSpinBox *>("chattingDelay"); if (!delay || delay->value() != 45) result = 43;
             if (!hasDelayHint(wizard)) result = 50;
             if (delay) { typeSeconds(delay, "120"); if (delay->value() != 120) result = 51; }

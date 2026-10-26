@@ -37,7 +37,7 @@ void Client::resetSession()
 {
     shutdown(); ++searchGeneration; ++updateGeneration;
     ready = updating = refreshing = false;
-    userId.clear(); loginName.clear(); deviceCode.clear(); currentCategory = {};
+    userId.clear(); loginName.clear(); deviceCode.clear(); currentCategory = {}; confirmedAt = {};
     emit accountChanged(); emit currentChanged(); emit searchFinished();
 }
 void Client::request(const QByteArray &method, const QUrl &url, const QByteArray &body, bool authenticated, Callback callback)
@@ -247,18 +247,22 @@ static bool channel(const Response &r, const QString &user, Category &c)
     c = {obj["game_id"].toString(), obj["game_name"].toString(), {}};
     return c.id.isEmpty() || validCategoryId(c.id);
 }
-void Client::readCurrent()
+void Client::readCurrent(bool announce)
 {
     if (!ready || updating || reading) return;
     reading = true; emit currentReadChanged();
-    emit status("正在重新整理目前分類…", StatusLevel::Progress);
+    if (announce) emit status("正在重新整理目前分類…", StatusLevel::Progress);
     const auto operation = updateGeneration;
-    request("GET", channelUrl(), {}, true, [this, operation](const Response &r) {
+    request("GET", channelUrl(), {}, true, [this, operation, announce](const Response &r) {
         reading = false; emit currentReadChanged();
         if (operation != updateGeneration || updating) return;
         Category c;
-        if (channel(r, userId, c)) { currentCategory = c; emit currentChanged(); emit status("已讀取目前分類", StatusLevel::Success); loadCurrentArt(); }
-        else { emit status("無法取得最新分類；" + failure(r), StatusLevel::Error); if (r.code == 401) refresh(); }
+        if (channel(r, userId, c)) {
+            if (c.id == currentCategory.id) c.art = currentCategory.art;
+            currentCategory = c; confirmedAt = QDateTime::currentDateTimeUtc(); emit currentChanged(); emit currentReadFinished(true);
+            if (announce) emit status("已讀取目前分類", StatusLevel::Success);
+            if (currentCategory.art.isEmpty()) loadCurrentArt();
+        } else { emit currentReadFinished(false); emit status("無法取得最新分類；" + failure(r), StatusLevel::Error); if (r.code == 401) refresh(); }
     });
 }
 void Client::apply(const Category &category)
@@ -295,7 +299,7 @@ void Client::confirm(Category target, quint64 operation, int attempt)
         if (operation != updateGeneration) return;
         Category actual;
         if (channel(r, userId, actual)) {
-            currentCategory = actual; emit currentChanged();
+            currentCategory = actual; confirmedAt = QDateTime::currentDateTimeUtc(); emit currentChanged(); emit currentReadFinished(true);
             if (actual.id == target.id) { finishUpdate("更新成功，目前分類：" + actual.name, StatusLevel::Success); loadCurrentArt(); return; }
         }
         if (r.code == 401 || r.code == 403 || r.code == 429 || attempt >= 3) {

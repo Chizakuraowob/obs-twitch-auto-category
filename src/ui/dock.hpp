@@ -43,6 +43,7 @@ private:
     void processScan();
     void applySelected();
     void refreshFavorites();
+    void favoriteFeedback(QPushButton *button, const QString &message);
     void applySuggestion();
     void notifySuggestion(const Candidate &candidate);
     void reviewUnknown();
@@ -52,7 +53,8 @@ private:
     bool rememberRecognition(const RecognitionRule &rule);
     void fetchArt(const Category &category);
 
-    void setStatus(const QString &message, Client::StatusLevel level = Client::StatusLevel::Notice);
+    void setStatus(const QString &message, Client::StatusLevel level = Client::StatusLevel::Notice, bool temporary = true);
+    void restoreStatus();
     void animate(QWidget *widget);
     QString effectiveClientId() const;
     QString directory, settingsPath;
@@ -61,7 +63,8 @@ private:
     Updater updater;
     QNetworkAccessManager images;
     QFutureWatcher<Processes> watcher;
-    QTimer scanTimer, refreshTimer, searchTimer;
+    QTimer scanTimer, refreshTimer, searchTimer, statusResetTimer, currentSyncTimer;
+    bool categorySyncFailed = false;
     bool searching = false, accountConnecting = false;
     int refreshAngle = 0;
     QLabel *accountIndicator, *statusIndicator;
@@ -91,7 +94,7 @@ private:
 
     WindowEvidence pendingWindow;
     QVector<WindowEvidence> observedWindows;
-    QLabel *unknownLabel;
+    QLabel *unknownLabel, *resumeHint;
     QWidget *contentBody;
     QPushButton *recoverButton;
     QPushButton *reviewUnknownButton;
