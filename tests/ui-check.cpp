@@ -55,6 +55,45 @@ struct DockTestAccess {
         for (auto *button : prompt->buttons()) if (prompt->buttonRole(button) == (accept ? QMessageBox::AcceptRole : QMessageBox::RejectRole)) { button->click(); break; }
         return dock.suggestionSession.handled.contains(suggestionKey(candidate));
     }
+    static bool idleDecisionRemembered(Dock &dock, int action, const QString &screenshot) {
+        dock.scanTimer.stop(); dock.watcher.disconnect(&dock); dock.watcher.waitForFinished();
+        dock.config.developerMode = true; dock.config.notifications = true; dock.config.chattingSuggestion = true;
+        dock.config.autoDetect = true; dock.config.paused = false;
+        dock.suggestionSession = {};
+        const auto now = QDateTime::currentSecsSinceEpoch();
+        Processes process; process.available = true; process.executables = {"finished-game.exe"};
+        dock.suggestionSession.update(process, {{"finished-game.exe", "42", "Game", 0}}, now - 1000);
+        process.executables.clear();
+        dock.suggestionSession.update(process, {}, now - dock.config.chattingDelay - 1);
+        auto scan = [&] {
+            QPromise<Processes> promise; promise.start(); promise.addResult(process); promise.finish();
+            dock.watcher.setFuture(promise.future()); dock.processScan();
+        };
+        scan();
+        auto *prompt = dock.suggestionPrompt.data();
+        if (!prompt || !prompt->isVisible() || !prompt->property("idleSuggestion").toBool() || prompt->buttons().size() != 2) return false;
+        QAbstractButton *button = nullptr;
+        for (auto *candidate : prompt->buttons()) {
+            if (prompt->buttonRole(candidate) == (action == 2 ? QMessageBox::AcceptRole : QMessageBox::RejectRole)) button = candidate;
+        }
+        if (!button || (action != 2 && button->text() != "這次不再提醒")) return false;
+        if (action == 0 && !prompt->grab().save(screenshot)) return false;
+        if (action == 1) prompt->reject(); else button->click();
+        // Repeated scans and a restarted countdown must preserve the user's decision.
+        scan(); dock.suggestionSession.pause();
+        dock.suggestionSession.idleSince = now - dock.config.chattingDelay - 1;
+        scan(); scan();
+        if (!dock.suggestionSession.idleNotified || (dock.suggestionPrompt && dock.suggestionPrompt->isVisible())) return false;
+        process.executables = {"next-game.exe"};
+        dock.suggestionSession.update(process, {{"next-game.exe", "43", "Next game", 0}}, now);
+        if (dock.suggestionSession.idleNotified) return false;
+        process.executables.clear(); dock.suggestionSession.idleSince = now - dock.config.chattingDelay - 1;
+        scan();
+        prompt = dock.suggestionPrompt.data();
+        const bool nextGameReminds = prompt && prompt->isVisible() && prompt->property("idleSuggestion").toBool();
+        if (prompt) prompt->reject();
+        return nextGameReminds;
+    }
     static bool promptOnce(Dock &dock, const WindowEvidence &window) {
         dock.config.developerMode = true;
         Processes snapshot; snapshot.windows = {window};
@@ -263,6 +302,8 @@ int main(int argc, char **argv)
         });
         if (!tca::DockTestAccess::games(light)) result = 47;
         if (!tca::DockTestAccess::decisionRemembered(light, true) || !tca::DockTestAccess::decisionRemembered(light, false)) result = 40;
+        for (int action = 0; action < 3; ++action)
+            if (!tca::DockTestAccess::idleDecisionRemembered(light, action, output + "/chatting-suggestion.png")) result = 74 + action;
         light.stop(); light.hide();
         QTemporaryDir upgradeTemp;
         auto legacy = settings.json(); legacy["wizardDone"] = true; legacy.remove("wizardRevision");

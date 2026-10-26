@@ -377,17 +377,19 @@ void Dock::notifySuggestion(const Candidate &candidate)
                  config.developerMode ? "開發者模式：只預演，不修改 Twitch。" : "要更新直播分類嗎？"), QMessageBox::NoButton, this);
     suggestionPrompt = prompt; prompt->setObjectName("categorySuggestionPrompt");
     prompt->setProperty("idleSuggestion", idle);
-    if (idle) { prompt->setWindowTitle("遊戲已結束 · 分類更新建議"); prompt->setText(QString("遊戲結束已等待 %1 秒，是否改為 Just Chatting？\n如果仍在換遊戲，可選擇延後提醒。\n").arg(config.chattingDelay) + QString(config.developerMode ? "開發者模式：只預演，不修改 Twitch。" : "只在你確認後更新，不會自動切換。")); }
+    if (idle) {
+        suggestionSession.idleNotified = true;
+        prompt->setWindowTitle("遊戲已結束 · 分類更新建議");
+        prompt->setText(QString("遊戲結束已等待 %1 秒，是否改為 Just Chatting？\n選擇「這次不再提醒」或關閉視窗，會保留目前分類，本次遊戲結束不再詢問。\n").arg(config.chattingDelay) + QString(config.developerMode ? "開發者模式：只預演，不修改 Twitch。" : "只在你確認後更新，不會自動切換。"));
+    }
     prompt->setAttribute(Qt::WA_ShowWithoutActivating);
     prompt->setAttribute(Qt::WA_DeleteOnClose); prompt->setWindowModality(Qt::NonModal); prompt->setStyleSheet(themeSheet(config));
-    auto *apply = prompt->addButton(config.developerMode ? "預演套用" : "更新分類", QMessageBox::AcceptRole);
-    auto *dismiss = prompt->addButton(idle ? "維持目前分類" : "本次遊戲不再提醒", QMessageBox::RejectRole); prompt->setDefaultButton(dismiss);
+    auto *apply = prompt->addButton(config.developerMode ? "預演套用" : idle ? "切換為 Just Chatting" : "更新分類", QMessageBox::AcceptRole);
+    auto *dismiss = prompt->addButton(idle ? "這次不再提醒" : "本次遊戲不再提醒", QMessageBox::RejectRole); prompt->setDefaultButton(dismiss);
     apply->setEnabled(config.developerMode || (config.consented() && client.connected() && !client.busy()));
-    auto *snooze = idle ? prompt->addButton("正在換遊戲，延後提醒", QMessageBox::ActionRole) : nullptr;
     const bool preview = config.developerMode;
-    connect(prompt, &QMessageBox::buttonClicked, this, [this, apply, candidate, preview, idle, snooze](QAbstractButton *clicked) {
+    connect(prompt, &QMessageBox::buttonClicked, this, [this, apply, candidate, preview, idle](QAbstractButton *clicked) {
         if (stopped || preview != config.developerMode || !config.suggestionsEnabled(streaming)) return;
-        if (snooze && clicked == snooze) { suggestionSession.pause(); suggestionSession.idleNotified = false; return; }
         if (!idle) suggestionSession.handled.insert(suggestionKey(candidate));
         if (clicked != apply) return;
         bool stillDetected = false; for (const auto &c : detected) if (c.id == candidate.id && c.executable == candidate.executable) stillDetected = true;
@@ -611,7 +613,7 @@ void Dock::processScan()
     if (suggestionPrompt && suggestionPrompt->property("idleSuggestion").toBool() && (!suggestionSession.idleReady || client.current().id == "509658")) suggestionPrompt->close();
     if (suggestionSession.idleReady && !suggestionSession.idleNotified && config.notifications &&
         (config.developerMode || client.connected()) && client.current().id != "509658") {
-        suggestionSession.idleNotified = true; notifySuggestion({"@idle", "509658", "Just Chatting", 0});
+        notifySuggestion({"@idle", "509658", "Just Chatting", 0});
     }
     QSet<QString> running;
     for (const auto &c : detected) running.insert(c.id);
