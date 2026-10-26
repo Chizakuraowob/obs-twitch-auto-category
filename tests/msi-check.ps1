@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$Path, [string]$ExpectedObsPath, [switch]$ProbeLaunch, [switch]$ProbeProcess)
+param([Parameter(Mandatory)][string]$Path, [string]$ExpectedObsPath, [switch]$ProbeLaunch, [switch]$ProbeProcess, [switch]$SkipMachineChecks)
 $ErrorActionPreference = 'Stop'
 $installer = New-Object -ComObject WindowsInstaller.Installer
 $database = $null; $session = $null
@@ -43,7 +43,7 @@ try {
     if ($ExpectedObsPath -and $found -ne $ExpectedObsPath) { throw "OBS discovery mismatch: '$found'" }
     $conditions = @(Read-Table 'LaunchCondition')
     foreach ($row in $conditions) {
-        if ($session.EvaluateCondition($row[0]) -ne 1) { throw "Launch condition rejected this machine: $($row[1])" }
+        if (!$SkipMachineChecks -and $session.EvaluateCondition($row[0]) -ne 1) { throw "Launch condition rejected this machine: $($row[1])" }
     }
     $osCondition = @($conditions | Where-Object { $_[1] -eq '需要 Windows 11 x64。' })[0][0]
     foreach ($case in @(@('603','9600','22000',1), @('603','9600','26300',1), @('1000','26300','19045',0), @('603','9600','',0), @('','9600','26300',0))) {

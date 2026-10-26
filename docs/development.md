@@ -52,7 +52,7 @@ Windows Smart App Control 會檢查被 OBS 載入的 DLL，不只 MSI。正式�
 
 關閉 OBS，複製 `dist/twitch-category-assistant` 至 `%ProgramData%/obs-studio/plugins/`。`scripts/install-plugin.ps1` 可協助第一次複製，但遇到既有目錄會停止，避免覆蓋未確認的版本。舊的手動安裝轉 MSI 前請先備份並移走舊外掛目錄。
 
-首次啟動 OBS 時會將 Dock 停駐在右側並顯示設定精靈。完成後尊重使用者保存的版面；未完成精靈則下次啟動再次提示。由舊版升級時重新確認精靈完成狀態，以修正舊版允許跳過登入的問題。
+首次啟動 OBS 時會將 Dock 停駐在右側並顯示設定精靈。完成後尊重使用者保存的版面；未完成精靈則下次啟動再次提示。0.5.3 起保留舊版已完成狀態，文件更新只顯示獨立同意確認，不重跑整個精靈。
 
 ```powershell
 # build.ps1 已設定 Qt PATH 並執行下面兩項 CTest
@@ -106,4 +106,10 @@ MSI 原生檢查工具不依賴 Qt，不發送關閉訊息或終止程序。`tca
 ## 自訂產品資訊
 
 MSI／DLL 名稱、作者、版號、修訂版號、描述與安裝文案請見 [產品資訊編輯指南](edit-release-metadata.md)。主要設定在根目錄 buildspec.json；更改後重新建置和封裝。
+
+## CI、來源封裝與簽章
+
+GitHub 工作流程、作者端變數與草稿 Release 操作見 [ci-release.md](ci-release.md)。本機執行 `scripts/package-sources.ps1` 可收集已提交版本的對應來源、第三方來源、SBOM 及雜湊清單；工作目錄必須乾淨。
+
+[Code signing policy／免費簽章準備](code-signing.md) 記錄 SignPath 申請條件與第三方元件限制。目前未取得簽章，不在安裝器自動信任自簽憑證。
 

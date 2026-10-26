@@ -1,0 +1,85 @@
+name: Windows build and release preparation
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      create_draft:
+        description: 'Create a draft Release from a matching version tag (never publishes)'
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Validate version and publisher configuration
+        env:
+          PUBLIC_CLIENT_ID: ${{ vars.TWITCH_CLIENT_ID }}
+          CREATE_DRAFT: ${{ inputs.create_draft }}
+        run: |
+          $spec = Get-Content buildspec.json -Raw | ConvertFrom-Json
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -cne "v$($spec.version)") { throw 'Tag must match buildspec.json version.' }
+          if ($env:CREATE_DRAFT -eq 'true' -and $env:GITHUB_REF_TYPE -ne 'tag') { throw 'Select a version tag to prepare a draft Release.' }
+          if ($env:PUBLIC_CLIENT_ID -and $env:PUBLIC_CLIENT_ID -notmatch '^[a-zA-Z0-9]+$') { throw 'Invalid public Twitch Client ID.' }
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and !$env:PUBLIC_CLIENT_ID) { throw 'Set repository variable TWITCH_CLIENT_ID before release builds.' }
+      - name: Build and run CTest
+        env:
+          PUBLIC_CLIENT_ID: ${{ vars.TWITCH_CLIENT_ID }}
+        run: ./scripts/build.ps1 -ClientId $env:PUBLIC_CLIENT_ID
+      - name: Package and inspect MSI without installing
+        env:
+          PUBLIC_CLIENT_ID: ${{ vars.TWITCH_CLIENT_ID }}
+        run: |
+          ./scripts/package-msi.ps1 -Preview:(!$env:PUBLIC_CLIENT_ID)
+          $msi = @(Get-ChildItem dist/installer/*.msi)
+          if ($msi.Count -ne 1) { throw 'Expected exactly one MSI.' }
+          # Hosted runners do not have OBS installed; still check payload, guards and OS boundaries.
+          ./tests/msi-check.ps1 -Path $msi[0].FullName -SkipMachineChecks
+          # Preview names intentionally differ from production metadata.
+          if ($env:PUBLIC_CLIENT_ID) { ./tests/metadata-check.ps1 -Path $msi[0].FullName }
+      - name: Collect corresponding source
+        run: |
+          ./tests/source-package-check.ps1
+          ./scripts/package-sources.ps1
+      - name: Upload installer and source assets
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-release-assets
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            dist/installer/*.msi
+            dist/installer/*.sha256
+            dist/sources/*
+  draft:
+    if: github.event_name == 'workflow_dispatch' && inputs.create_draft
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: windows-release-assets
+          path: assets
+      - name: Create draft for manual review
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -d '' files < <(find assets -type f -print0)
+          gh release create "$RELEASE_TAG" "${files[@]}" --verify-tag --draft --title "$RELEASE_TAG" --notes 'Unsigned build: Smart App Control may block the plugin DLL. Review installation, upgrade, signatures, corresponding source, and asset SHA-256 before publishing. Do not publish as a signed release.'
