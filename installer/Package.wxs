@@ -27,14 +27,15 @@
     <!-- Never force-kill OBS, restart Windows, or let Restart Manager close a live stream silently. -->
     <Property Id="MSIRESTARTMANAGERCONTROL" Value="Disable" />
     <Property Id="REBOOT" Value="ReallySuppress" />
-    <util:CloseApplication Id="CloseObsInteractive" Target="obs64.exe" Condition="UILevel &gt;= 4"
-        Description="OBS 正在執行。請先結束直播或錄影並儲存設定。按「重試」重新檢查；按「略過」請求 OBS 正常關閉；按「中止」取消安裝。外掛安裝器不會強制終止 OBS。"
-        PromptToContinue="yes" CloseMessage="yes" EndSessionMessage="no" RebootPrompt="no" Timeout="15" Property="OBSRUNNING" Sequence="1" />
-    <util:CloseApplication Id="CheckObsSilent" Target="obs64.exe" Condition="UILevel &lt; 4"
-        CloseMessage="no" RebootPrompt="no" Property="OBSRUNNING" Sequence="2" />
-    <CustomAction Id="ObsStillRunning" Error="OBS 尚未關閉。安裝已取消，請關閉 OBS 後重試。" />
+    <Binary Id="ObsCheckBinary" SourceFile="$(var.ProjectRoot)\build_x64\RelWithDebInfo\tca-installer-check.dll" />
+    <CustomAction Id="CheckObsBeforeStart" BinaryRef="ObsCheckBinary" DllEntry="TcaCheckObs" Return="check" />
+    <CustomAction Id="CheckObsBeforeFiles" BinaryRef="ObsCheckBinary" DllEntry="TcaCheckObs" Return="check" />
+    <InstallUISequence>
+      <Custom Action="CheckObsBeforeStart" Before="ExecuteAction" />
+    </InstallUISequence>
     <InstallExecuteSequence>
-      <Custom Action="ObsStillRunning" After="Wix4CloseApplications_X64" Condition="OBSRUNNING" />
+      <Custom Action="CheckObsBeforeStart" Before="InstallValidate" />
+      <Custom Action="CheckObsBeforeFiles" Before="InstallFiles" />
     </InstallExecuteSequence>
     <StandardDirectory Id="CommonAppDataFolder">
       <Directory Id="ObsData" Name="obs-studio">

@@ -16,11 +16,16 @@
 #include <QSignalBlocker>
 #include <QFileInfo>
 #include <QMessageBox>
+#include <QTableWidget>
+#include <QScrollArea>
+#include <QScrollBar>
 #include <cstdio>
 #include <QDateTime>
 
 namespace tca {
 struct DockTestAccess {
+    static void searchResult(Dock &dock) { emit dock.client.results({{"555", "搜尋到的遊戲", {}}}, {}); }
+    static bool games(Dock &dock) { dock.suggestionSession.played = true; dock.recognitionDialog(); return dock.suggestionSession.played; }
     static bool decisionRemembered(Dock &dock, bool accept) {
         dock.config.developerMode = true;
         Candidate candidate{"fixture.exe", accept ? "123" : "124", "Decision fixture", 0};
@@ -32,11 +37,10 @@ struct DockTestAccess {
     static bool promptOnce(Dock &dock, const WindowEvidence &window) {
         dock.config.developerMode = true;
         Processes snapshot; snapshot.windows = {window};
-        dock.updateUnknown(snapshot); dock.unknownSince = QDateTime::currentSecsSinceEpoch() - 7;
         dock.updateUnknown(snapshot);
-        if (!dock.unknownPrompt || !dock.unknownPrompt->isVisible()) return false;
-        dock.unknownPrompt->reject(); dock.updateUnknown(snapshot);
-        return !dock.unknownPrompt || !dock.unknownPrompt->isVisible();
+        dock.updateUnknown(snapshot);
+        if (dock.pendingWindow.executable != window.executable) return false;
+        return !dock.findChild<QMessageBox *>("unknownGamePrompt");
     }
     static void review(Dock &dock, const WindowEvidence &window) {
         dock.config.developerMode = true;
@@ -58,6 +62,7 @@ int main(int argc, char **argv)
     tca::Settings settings;
     settings.theme = 2; settings.wizardDone = true;
     settings.favorites = {{"509658", "Just Chatting"}, {"42", "測試遊戲"}};
+    settings.rules = {{"legacy-fixture.exe", "77", "既有遊戲", 0}}; settings.categoryCache.insert("steam:1", {"78", "遊戲庫遊戲"});
     // No consent: never restore the real user's Credential Manager session in UI tests.
     QString error;
     if (!settings.save(temp.filePath("settings.json"), &error)) return 2;
@@ -77,17 +82,22 @@ int main(int argc, char **argv)
             auto *dialog = qobject_cast<QDialog *>(app.activeModalWidget());
             if (!dialog || !dialog->grab().save(output + "/settings-dark.png")) result = 6;
             if (dialog) {
-                auto *size = dialog->findChild<QSpinBox *>();
+                auto *size = dialog->findChild<QSpinBox *>("fontSize");
                 if (!size) result = 13;
                 else size->setValue(18);
+                auto *delay = dialog->findChild<QSpinBox *>("chattingDelay");
+                if (!delay || delay->minimum() != 15 || delay->maximum() != 600) result = 41;
+                else delay->setValue(45);
                 dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Save)->click();
                 if (tca::Settings::load(temp.filePath("settings.json"), &error).fontSize != 18) result = 14;
+                if (tca::Settings::load(temp.filePath("settings.json"), &error).chattingDelay != 45) result = 42;
             }
         });
         settingsButton->click();
         QTimer::singleShot(200, &app, [&] {
             auto *wizard = qobject_cast<QWizard *>(app.activeModalWidget());
             if (!wizard) { result = 7; return; }
+            auto *delay = wizard->findChild<QSpinBox *>("chattingDelay"); if (!delay || delay->value() != 45) result = 43;
             wizard->next(); wizard->next(); app.processEvents();
             if (wizard->button(QWizard::NextButton)->isEnabled()) result = 8;
             settle();
@@ -132,7 +142,10 @@ int main(int argc, char **argv)
             if (combo->view()->palette().color(QPalette::Text).lightness() > 100) result = 23;
             if (!dialog->grab().save(output + "/settings-light.png") ||
                 !combo->view()->window()->grab().save(output + "/theme-popup-light.png")) result = 24;
-            combo->hidePopup(); dialog->reject();
+            combo->hidePopup();
+            auto *scroll = dialog->findChild<QScrollArea *>();
+            if (scroll) { scroll->verticalScrollBar()->setValue(dialog->findChild<QWidget *>("checkUpdates")->mapTo(scroll->widget(), QPoint{}).y() - 180); settle(); if (!dialog->grab().save(output + "/settings-updates.png")) result = 48; }
+            dialog->reject();
         });
         for (auto *button : light.findChildren<QPushButton *>()) if (button->text() == "設定") { button->click(); break; }
         const tca::WindowEvidence fixture{"unlisted.exe", "GameWindow", "Independent Game", {}, "launcher.exe", {}, true};
@@ -144,13 +157,24 @@ int main(int argc, char **argv)
             auto *buttons = dialog->findChild<QDialogButtonBox *>();
             if (buttons->button(QDialogButtonBox::Save)->isEnabled()) result = 35;
             if (dialog->findChild<QCheckBox *>("recognitionUsePath")->isEnabled()) result = 36;
-            category->setCurrentIndex(1); settle();
+            tca::DockTestAccess::searchResult(light);
+            const int found = category->findData("555"); if (found < 1) result = 49;
+            category->setCurrentIndex(found); settle();
             if (!dialog->grab().save(output + "/recognition-confirm.png")) result = 37;
             buttons->button(QDialogButtonBox::Save)->click();
         });
         tca::DockTestAccess::review(light, fixture);
         const auto learnedSettings = tca::Settings::load(lightTemp.filePath("settings.json"), &error);
         if (learnedSettings.recognitionRules.size() != 1 || tca::matchRecognition(fixture, learnedSettings.recognitionRules) != 0) result = 38;
+        QTimer::singleShot(100, &app, [&] {
+            auto *dialog = qobject_cast<QDialog *>(app.activeModalWidget()); auto *table = dialog ? dialog->findChild<QTableWidget *>("myGamesTable") : nullptr;
+            if (!table || table->rowCount() != 3) { result = 44; if (dialog) dialog->reject(); return; }
+            table->setCurrentCell(1, 0);
+            for (auto *button : dialog->findChildren<QPushButton *>()) if (button->text() == "不是遊戲") { button->click(); break; }
+            if (!tca::Settings::load(lightTemp.filePath("settings.json"), &error).rules[0].ignored) result = 45;
+            if (!dialog->grab().save(output + "/my-games.png")) result = 46; dialog->reject();
+        });
+        if (!tca::DockTestAccess::games(light)) result = 47;
         if (!tca::DockTestAccess::decisionRemembered(light, true) || !tca::DockTestAccess::decisionRemembered(light, false)) result = 40;
         light.stop(); light.hide();
         QTemporaryDir firstTemp;

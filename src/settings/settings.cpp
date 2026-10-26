@@ -82,7 +82,7 @@ QJsonObject Settings::json() const
 {
     QJsonArray list;
     for (const auto &r : rules)
-        list.append(QJsonObject{{"exe", r.executable}, {"id", r.categoryId}, {"name", r.categoryName}, {"priority", r.priority}});
+        list.append(QJsonObject{{"exe", r.executable}, {"id", r.categoryId}, {"name", r.categoryName}, {"priority", r.priority}, {"ignored", r.ignored}});
     QJsonArray savedFavorites;
     for (const auto &f : favorites) savedFavorites.append(QJsonObject{{"id", f.id}, {"name", f.name}});
     QJsonObject cache; for (auto it = categoryCache.begin(); it != categoryCache.end(); ++it) cache[it.key()] = QJsonObject{{"id", it->id}, {"name", it->name}};
@@ -91,6 +91,8 @@ QJsonObject Settings::json() const
         {"developerMode", developerMode}, {"favorites", savedFavorites},
         {"autoDetect", autoDetect}, {"detectLibraries", detectLibraries}, {"allowCategoryLookup", allowCategoryLookup}, {"categoryCache", cache},
         {"learnUnknown", learnUnknown}, {"recognitionRules", recognitionJson(recognitionRules)},
+        {"chattingSuggestion", chattingSuggestion}, {"chattingDelay", chattingDelay}, {"checkUpdates", checkUpdates}, {"skippedUpdate", skippedUpdate},
+        {"ignoredLibraries", QJsonArray::fromStringList(ignoredLibraries)},
         {"wizardDone", wizardDone}, {"wizardRevision", 2}, {"termsVersion", termsVersion}, {"privacyVersion", privacyVersion},
         {"termsUtc", termsUtc}, {"privacyUtc", privacyUtc}, {"rules", list}};
 }
@@ -109,6 +111,9 @@ Settings Settings::fromJson(const QJsonObject &o)
     s.developerMode = o["developerMode"].toBool();
     s.autoDetect = o["autoDetect"].toBool(true); s.detectLibraries = o["detectLibraries"].toBool(true); s.allowCategoryLookup = o["allowCategoryLookup"].toBool();
     s.learnUnknown = o["learnUnknown"].toBool(true);
+    s.chattingSuggestion = o["chattingSuggestion"].toBool(true); s.chattingDelay = std::clamp(o["chattingDelay"].toInt(90), 15, 600);
+    s.checkUpdates = o["checkUpdates"].toBool(false); s.skippedUpdate = o["skippedUpdate"].toString().left(32);
+    for (const auto &key : o["ignoredLibraries"].toArray()) if (validLibraryKey(key.toString()) && !s.ignoredLibraries.contains(key.toString()) && s.ignoredLibraries.size() < 1000) s.ignoredLibraries.append(key.toString());
     QVector<RecognitionRule> learned; if (parseRecognition(o["recognitionRules"].toArray(), &learned)) s.recognitionRules = learned;
     const auto cache = o["categoryCache"].toObject();
     for (auto it = cache.begin(); it != cache.end() && s.categoryCache.size() < 1000; ++it) {
@@ -128,7 +133,7 @@ Settings Settings::fromJson(const QJsonObject &o)
     s.termsUtc = o["termsUtc"].toString(); s.privacyUtc = o["privacyUtc"].toString();
     for (const auto &entry : o["rules"].toArray()) {
         auto r = entry.toObject();
-        Rule rule{r["exe"].toString().trimmed().toLower(), r["id"].toString(), r["name"].toString().left(256), r["priority"].toInt()};
+        Rule rule{r["exe"].toString().trimmed().toLower(), r["id"].toString(), r["name"].toString().left(256), r["priority"].toInt(), r["ignored"].toBool()};
         if (validExecutable(rule.executable) && validCategoryId(rule.categoryId) && !rule.categoryName.isEmpty() && s.rules.size() < 500)
             s.rules.push_back(rule);
     }

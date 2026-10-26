@@ -16,7 +16,7 @@
 #include <tlhelp32.h>
 namespace tca {
 QString suggestionKey(const Candidate &candidate) { return candidate.executable.toLower() + "/" + candidate.id; }
-void SuggestionSession::update(const Processes &processes, const QVector<Candidate> &detected, bool uncertain, qint64 now)
+void SuggestionSession::update(const Processes &processes, const QVector<Candidate> &detected, qint64 now, int delay)
 {
     if (!processes.available) { pause(); return; }
     for (const auto &candidate : detected) games.insert(candidate.executable.toLower());
@@ -36,9 +36,9 @@ void SuggestionSession::update(const Processes &processes, const QVector<Candida
         }
     }
     if (!detected.isEmpty()) { played = true; idleNotified = false; }
-    if (!played || running || !detected.isEmpty() || !processes.localGames.isEmpty() || uncertain) { pause(); return; }
+    if (!played || running || !detected.isEmpty() || !processes.localGames.isEmpty()) { pause(); return; }
     if (idleSince < 0) idleSince = now;
-    idleReady = now - idleSince >= 90;
+    idleReady = now - idleSince >= std::clamp(delay, 15, 600);
 }
 static QByteArray boundedFile(const QString &path)
 {
@@ -189,7 +189,7 @@ static QString processPath(DWORD pid)
 struct GameWindows {
     QHash<DWORD, QString> processes; QHash<DWORD, DWORD> parents;
     QVector<Rule> games; QVector<InstalledGame> installed; QVector<RunningGame> running; QVector<WindowEvidence> windows;
-    QStringList learnedExecutables; HWND foreground = nullptr; bool libraries = false, inspectForeground = true;
+    QStringList learnedExecutables; HWND foreground = nullptr; bool libraries = false, inspectForeground = true, inspectAll = false;
 };
 static BOOL CALLBACK inspectGameWindow(HWND window, LPARAM parameter)
 {
@@ -199,7 +199,7 @@ static BOOL CALLBACK inspectGameWindow(HWND window, LPARAM parameter)
     const auto exe = context.processes.value(pid);
     if (exe.isEmpty()) return TRUE;
     const bool inspect = context.learnedExecutables.contains(exe, Qt::CaseInsensitive) ||
-        (context.inspectForeground && window == context.foreground && canLearnWindow(exe));
+        ((context.inspectAll || (context.inspectForeground && window == context.foreground)) && canLearnWindow(exe));
     const auto path = (inspect || !context.installed.isEmpty()) ? processPath(pid) : QString{};
     if (inspect && pid != GetCurrentProcessId()) {
         wchar_t title[257]{}, windowClass[257]{}; GetWindowTextW(window, title, 257); GetClassNameW(window, windowClass, 257);
@@ -236,11 +236,12 @@ static BOOL CALLBACK inspectGameWindow(HWND window, LPARAM parameter)
     }
     return TRUE;
 }
-Processes scanProcesses(bool libraries, const QStringList &learnedExecutables, bool inspectForeground)
+Processes scanProcesses(bool libraries, const QStringList &learnedExecutables, bool inspectForeground, bool inspectAll)
 {
     Processes result;
     GameWindows games;
     games.libraries = libraries;
+    games.inspectAll = inspectAll;
     games.learnedExecutables = learnedExecutables; games.inspectForeground = inspectForeground; games.foreground = GetForegroundWindow();
     if (libraries) games.installed = installedGames();
     const HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
@@ -285,7 +286,7 @@ QVector<Candidate> candidates(const Processes &processes, const QVector<Rule> &r
         bool conflict = false;
         for (const auto &other : effectiveRules)
             if (other.executable.compare(exe, Qt::CaseInsensitive) == 0 && other.categoryId != rule.categoryId) conflict = true;
-        if (!conflict) result.append({exe, rule.categoryId, rule.categoryName, rule.priority});
+        if (!conflict && !rule.ignored) result.append({exe, rule.categoryId, rule.categoryName, rule.priority});
     }
     return result;
 }

@@ -5,6 +5,10 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/common/bootstrap.cmake" NO_POLICY_SCO
 project(${_name} VERSION ${_version})
 
 set(TCA_TWITCH_CLIENT_ID "" CACHE STRING "Publisher's public Twitch application Client ID")
+set(TCA_UPDATE_REPOSITORY "Chizakuraowob/obs-twitch-auto-category" CACHE STRING "Publisher's GitHub release repository")
+if(NOT TCA_UPDATE_REPOSITORY STREQUAL "" AND NOT TCA_UPDATE_REPOSITORY MATCHES "^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*$")
+  message(FATAL_ERROR "TCA_UPDATE_REPOSITORY must be owner/repository or empty")
+endif()
 if(NOT TCA_TWITCH_CLIENT_ID MATCHES "^[a-zA-Z0-9]*$")
   message(FATAL_ERROR "TCA_TWITCH_CLIENT_ID must contain only letters and digits (never a secret)")
 endif()
@@ -52,30 +56,38 @@ if(ENABLE_QT)
 endif()
 
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
-  src/plugin/plugin.cpp src/ui/dock.cpp src/ui/dock.hpp src/ui/icons.qrc
+  src/plugin/plugin.cpp src/ui/dock.cpp src/ui/dock.hpp src/ui/icons.qrc src/update/updater.cpp src/update/updater.hpp
   src/twitch/client.cpp src/twitch/client.hpp
   src/settings/settings.cpp src/settings/settings.hpp
   src/security/credentials.cpp src/security/credentials.hpp
   src/detection/detector.cpp src/detection/detector.hpp)
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE src)
 target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE wintrust)
 
 include(CTest)
+add_library(tca-installer-check SHARED installer/obs-check.cpp)
+target_link_libraries(tca-installer-check PRIVATE msi)
+set_property(TARGET tca-installer-check PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 if(BUILD_TESTING)
-  add_executable(tca-tests tests/tests.cpp src/settings/settings.cpp src/detection/detector.cpp
+  add_executable(tca-obs-fixture tests/obs-fixture.cpp)
+  set_target_properties(tca-obs-fixture PROPERTIES OUTPUT_NAME obs64 RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/installer-fixture")
+  add_executable(tca-installer-test tests/installer-check.cpp)
+  target_link_libraries(tca-installer-test PRIVATE msi)
+  add_executable(tca-tests tests/tests.cpp src/settings/settings.cpp src/detection/detector.cpp src/update/updater.cpp
     src/twitch/client.cpp src/security/credentials.cpp)
   set_target_properties(tca-tests PROPERTIES AUTOMOC ON)
   target_include_directories(tca-tests PRIVATE src)
   target_compile_definitions(tca-tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
-  target_link_libraries(tca-tests PRIVATE Qt6::Core Qt6::Network Qt6::Concurrent Advapi32)
+  target_link_libraries(tca-tests PRIVATE Qt6::Core Qt6::Network Qt6::Concurrent Advapi32 wintrust)
   add_test(NAME tca-tests COMMAND tca-tests)
-  add_executable(tca-ui-check tests/ui-check.cpp src/ui/dock.cpp src/settings/settings.cpp src/detection/detector.cpp
+  add_executable(tca-ui-check tests/ui-check.cpp src/ui/dock.cpp src/settings/settings.cpp src/detection/detector.cpp src/update/updater.cpp
     src/twitch/client.cpp src/security/credentials.cpp)
   target_sources(tca-ui-check PRIVATE src/ui/icons.qrc)
   set_target_properties(tca-ui-check PROPERTIES AUTOMOC ON AUTORCC ON)
   target_include_directories(tca-ui-check PRIVATE src)
   target_compile_definitions(tca-ui-check PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
-  target_link_libraries(tca-ui-check PRIVATE Qt6::Widgets Qt6::Network Qt6::Concurrent Advapi32)
+  target_link_libraries(tca-ui-check PRIVATE Qt6::Widgets Qt6::Network Qt6::Concurrent Advapi32 wintrust)
   add_test(NAME tca-ui-check COMMAND tca-ui-check -platform minimal)
   add_executable(tca-tls-check tests/tls-check.cpp src/twitch/client.cpp src/settings/settings.cpp src/security/credentials.cpp)
   set_target_properties(tca-tls-check PROPERTIES AUTOMOC ON)

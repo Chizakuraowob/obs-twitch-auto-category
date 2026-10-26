@@ -1,15 +1,17 @@
 #pragma once
 #include <QJsonObject>
 #include <QString>
+#include <QStringList>
 #include <QVector>
 #include <QMap>
 #include <QJsonArray>
 
 namespace tca {
-inline const QString DocumentVersion = QStringLiteral("draft-2026-10-25-recognition-v2");
+inline const QString DocumentVersion = QStringLiteral("draft-2026-10-26-updates-v3");
 struct Rule {
     QString executable, categoryId, categoryName;
     int priority = 0;
+    bool ignored = false;
 };
 struct Favorite { QString id, name; };
 struct RecognitionRule {
@@ -30,8 +32,12 @@ struct Settings {
     bool developerMode = false;
     bool autoDetect = true, detectLibraries = true, allowCategoryLookup = false;
     bool learnUnknown = true;
+    bool chattingSuggestion = true, checkUpdates = false;
+    int chattingDelay = 90;
+    QString skippedUpdate;
     QVector<RecognitionRule> recognitionRules;
     QMap<QString, Favorite> categoryCache;
+    QStringList ignoredLibraries;
     int multiGame = 1; // foreground, manual, priority
     bool wizardDone = false;
     QString termsVersion, privacyVersion, termsUtc, privacyUtc;

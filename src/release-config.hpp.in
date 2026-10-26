@@ -1,3 +1,4 @@
 #pragma once
 // This is a public OAuth application identifier, not a secret or user credential.
 namespace tca { inline constexpr char PublisherClientId[] = "@TCA_TWITCH_CLIENT_ID@"; }
+namespace tca { inline constexpr char UpdateRepository[] = "@TCA_UPDATE_REPOSITORY@"; inline constexpr char PluginVersion[] = "@PROJECT_VERSION@"; }

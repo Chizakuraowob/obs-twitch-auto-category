@@ -15,6 +15,7 @@
 #include "settings/settings.hpp"
 #include "detection/detector.hpp"
 #include "twitch/client.hpp"
+#include "update/updater.hpp"
 
 using namespace tca;
 #define CHECK(expr) do { if (!(expr)) throw std::runtime_error("Line " + std::to_string(__LINE__) + ": " #expr); } while (false)
@@ -50,10 +51,12 @@ public:
     QQueue<Fixture> fixtures;
     QList<QUrl> urls;
     QList<QByteArray> bodies;
+    QList<QNetworkRequest> requests;
     bool unexpected = false;
 protected:
     QNetworkReply *createRequest(Operation, const QNetworkRequest &request, QIODevice *body) override {
         urls.append(request.url()); bodies.append(body ? body->readAll() : QByteArray{});
+        requests.append(request);
         if (fixtures.isEmpty()) { unexpected = true; return new Reply(request, {500, "{}"}, this); }
         return new Reply(request, fixtures.dequeue(), this);
     }
@@ -87,33 +90,64 @@ int main(int argc, char **argv)
         try { test(); ++passed; std::printf("PASS %s\n", name); }
         catch (const std::exception &error) { ++failed; std::fprintf(stderr, "FAIL %s: %s\n", name, error.what()); }
     };
+    run("idle delay settings migrate and ordinary windows do not delay chatting", [] {
+        auto settings = Settings::fromJson({}); CHECK(settings.chattingDelay == 90); CHECK(settings.chattingSuggestion); CHECK(!settings.checkUpdates);
+        CHECK(Settings::fromJson({{"chattingDelay", 0}}).chattingDelay == 15); CHECK(Settings::fromJson({{"chattingDelay", 9999}}).chattingDelay == 600);
+        settings.chattingDelay = 45; settings.chattingSuggestion = false; settings.checkUpdates = true; settings.skippedUpdate = "0.6.0"; settings.ignoredLibraries = {"steam:42"};
+        settings.rules = {{"not-game.exe", "42", "Not a game", 0, true}};
+        const auto copy = Settings::fromJson(settings.json()); CHECK(copy.chattingDelay == 45); CHECK(!copy.chattingSuggestion); CHECK(copy.checkUpdates); CHECK(copy.ignoredLibraries == settings.ignoredLibraries); CHECK(copy.rules[0].ignored);
+        SuggestionSession session; Processes p; p.available = true; p.executables = {"game.exe"}; session.update(p, {{"game.exe", "42", "Game", 0}}, 0, 45);
+        p.executables = {"editor.exe"}; p.windows = {{"editor.exe", "Editor", "Document", {}, {}, {}, true}};
+        session.update(p, {}, 1, 45); session.update(p, {}, 45, 45); CHECK(!session.idleReady);
+        session.update(p, {}, 46, 45); CHECK(session.idleReady);
+        CHECK(candidates({{"not-game.exe"}, {}, true}, copy.rules).isEmpty());
+    });
+    run("GitHub release validation, token isolation and digest-checked download", [] {
+        const QString repo = "Chizakuraowob/obs-twitch-auto-category";
+        const QByteArray payload(128, 'x'); const auto digest = QString::fromLatin1(QCryptographicHash::hash(payload, QCryptographicHash::Sha256).toHex());
+        QJsonObject asset{{"name", "twitch-category-assistant-0.6.0-windows-x64.msi"}, {"digest", "sha256:" + digest}, {"size", payload.size()}, {"browser_download_url", "https://github.com/" + repo + "/releases/download/v0.6.0/twitch-category-assistant-0.6.0-windows-x64.msi"}};
+        QJsonObject release{{"draft", false}, {"prerelease", false}, {"tag_name", "v0.6.0"}, {"body", "Notes"}, {"assets", QJsonArray{asset}}};
+        const auto encode = [&] { return QJsonDocument(release).toJson(); }; Release result; QString error;
+        CHECK(parseRelease(encode(), repo, "0.5.0", &result, &error)); CHECK(result.version == "0.6.0");
+        CHECK(parseRelease(encode(), repo, "0.6.0", &result, &error)); CHECK(result.version.isEmpty());
+        CHECK(!validUpdateRepository("obsproject/obs-plugintemplate")); CHECK(!updateDownloadUrl(QUrl("http://github.com/file"))); CHECK(!updateDownloadUrl(QUrl("https://github.com.attacker.invalid/a")));
+        CHECK(!updateDownloadUrl(QUrl("https://user@github.com/a")));
+        Transport transport; transport.fixtures.enqueue({200, encode()}); Updater updater(repo, "0.5.0", nullptr, &transport); updater.check(); waitFor([&] { return !updater.busy(); }); CHECK(updater.latest.version == "0.6.0");
+        CHECK(!transport.requests[0].hasRawHeader("Authorization")); CHECK(!transport.requests[0].hasRawHeader("Client-Id"));
+        QTemporaryDir temp; transport.fixtures.enqueue({200, payload}); updater.download(temp.path()); waitFor([&] { return !updater.busy(); });
+        CHECK(!updater.downloaded.isEmpty()); QFile file(updater.downloaded); CHECK(file.open(QIODevice::ReadOnly)); CHECK(file.readAll() == payload); file.close();
+        CHECK(QFile::remove(updater.downloaded)); transport.fixtures.enqueue({200, QByteArray(128, 'y')}); updater.download(temp.path()); waitFor([&] { return !updater.busy(); }); CHECK(updater.downloaded.isEmpty()); CHECK(QDir(temp.path()).entryList(QDir::Files).isEmpty());
+        asset["browser_download_url"] = "https://attacker.invalid/file.msi"; release["assets"] = QJsonArray{asset}; CHECK(!parseRelease(encode(), repo, "0.5.0", &result, &error));
+        release["prerelease"] = true; CHECK(!parseRelease(encode(), repo, "0.5.0", &result, &error));
+        CHECK(!parseRelease(QByteArray(2 * 1024 * 1024 + 1, 'x'), repo, "0.5.0", &result, &error)); CHECK(!transport.unexpected);
+    });
     run("suggestion decisions survive window loss and expire only after process exit", [] {
         SuggestionSession session;
         Candidate game{"game.exe", "42", "Game", 0}; Processes process; process.available = true; process.executables = {"game.exe"};
-        session.update(process, {game}, false, 0); session.handled.insert(suggestionKey(game));
-        session.update(process, {}, false, 300); CHECK(session.handled.contains(suggestionKey(game))); CHECK(!session.idleReady);
-        process.available = false; process.executables.clear(); session.update(process, {}, false, 600);
+        session.update(process, {game}, 0); session.handled.insert(suggestionKey(game));
+        session.update(process, {}, 300); CHECK(session.handled.contains(suggestionKey(game))); CHECK(!session.idleReady);
+        process.available = false; process.executables.clear(); session.update(process, {}, 600);
         CHECK(session.handled.contains(suggestionKey(game))); CHECK(!session.idleReady);
-        process.available = true; session.update(process, {}, false, 700);
-        session.update(process, {}, false, 759); CHECK(session.handled.contains(suggestionKey(game)));
-        process.executables = {"game.exe"}; session.update(process, {game}, false, 760); CHECK(session.handled.contains(suggestionKey(game)));
-        process.executables.clear(); session.update(process, {}, false, 800); session.update(process, {}, false, 860);
+        process.available = true; session.update(process, {}, 700);
+        session.update(process, {}, 759); CHECK(session.handled.contains(suggestionKey(game)));
+        process.executables = {"game.exe"}; session.update(process, {game}, 760); CHECK(session.handled.contains(suggestionKey(game)));
+        process.executables.clear(); session.update(process, {}, 800); session.update(process, {}, 860);
         CHECK(!session.handled.contains(suggestionKey(game)));
     });
     run("Just Chatting waits for a played game, quiet interval and cancels on transitions", [] {
         SuggestionSession session; Processes process; process.available = true;
-        session.update(process, {}, false, 0); session.update(process, {}, false, 1000); CHECK(!session.idleReady);
-        Candidate game{"game.exe", "42", "Game", 0}; process.executables = {"game.exe"}; session.update(process, {game}, false, 1001);
-        process.executables.clear(); session.update(process, {}, false, 1002); session.update(process, {}, false, 1091); CHECK(!session.idleReady);
-        session.update(process, {}, true, 1092); CHECK(!session.idleReady);
-        session.update(process, {}, false, 1100); session.update(process, {}, false, 1190); CHECK(session.idleReady);
-        session.idleNotified = true; session.update(process, {}, false, 1300); CHECK(session.idleNotified);
-        process.executables = {"other.exe"}; session.update(process, {{"other.exe", "43", "Other", 0}}, false, 1301);
+        session.update(process, {}, 0); session.update(process, {}, 1000); CHECK(!session.idleReady);
+        Candidate game{"game.exe", "42", "Game", 0}; process.executables = {"game.exe"}; session.update(process, {game}, 1001);
+        process.executables.clear(); session.update(process, {}, 1002); session.update(process, {}, 1091); CHECK(!session.idleReady);
+        session.pause(); session.update(process, {}, 1092); CHECK(!session.idleReady);
+        session.update(process, {}, 1100); session.update(process, {}, 1190); CHECK(session.idleReady);
+        session.idleNotified = true; session.update(process, {}, 1300); CHECK(session.idleNotified);
+        process.executables = {"other.exe"}; session.update(process, {{"other.exe", "43", "Other", 0}}, 1301);
         CHECK(!session.idleReady); CHECK(!session.idleNotified);
         process.executables.clear(); process.localGames = {{"steam:1", "Unmapped", "new.exe"}};
-        session.update(process, {}, false, 1500); CHECK(!session.idleReady);
-        process.localGames.clear(); session.update(process, {}, false, 1501); session.pause();
-        session.update(process, {}, false, 1700); CHECK(!session.idleReady);
+        session.update(process, {}, 1500); CHECK(!session.idleReady);
+        process.localGames.clear(); session.update(process, {}, 1501); session.pause();
+        session.update(process, {}, 1700); CHECK(!session.idleReady);
     });
     run("generic learning without readable paths and conflict rejection", [] {
         WindowEvidence window{"unknown-game.exe", "GameWindow", "New Game", {}, "launcher.exe", "Untrusted hint", true};

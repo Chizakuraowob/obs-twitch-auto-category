@@ -15,9 +15,9 @@ struct SuggestionSession {
     bool played = false, idleNotified = false, idleReady = false;
     qint64 idleSince = -1;
     void pause() { idleSince = -1; idleReady = false; }
-    void update(const Processes &processes, const QVector<Candidate> &detected, bool uncertain, qint64 now);
+    void update(const Processes &processes, const QVector<Candidate> &detected, qint64 now, int delay = 90);
 };
-Processes scanProcesses(bool libraries = true, const QStringList &learnedExecutables = {}, bool inspectForeground = true);
+Processes scanProcesses(bool libraries = true, const QStringList &learnedExecutables = {}, bool inspectForeground = true, bool inspectAll = false);
 bool canLearnWindow(const QString &executable);
 QString windowKey(const WindowEvidence &window);
 // -1 means unknown; -2 means conflicting rules. Neither may update a category.
