@@ -112,6 +112,7 @@ static QString themeSheet(const Settings &config)
         "QSpinBox::up-arrow {image:url(:/tca/up.svg);width:10px;height:10px;} QSpinBox::down-arrow {image:url(:/tca/down.svg);width:10px;height:10px;}"
         "QPushButton:disabled {color:%8;} QPushButton[primary=true] {background:#7565DF;color:white;font-weight:600;}"
         "QPushButton[primary=true]:disabled {background:%3;color:%8;} QPushButton[empty=true] {color:%8;}"
+        "QPushButton#categorySearchButton {font-weight:400;}"
         "QPushButton[secondary=true] {background:#EAE5FF;color:#443287;border-color:#B8A9EE;}"
         "QPushButton[danger=true] {background:%3;color:%9;border-color:%10;font-weight:600;}"
         "QPushButton[secondary=true]:disabled,QPushButton[danger=true]:disabled {background:%3;color:%8;border-color:%4;}"
@@ -212,18 +213,27 @@ Dock::Dock(QString settingsDirectory, QWidget *parent, QNetworkAccessManager *tr
         const auto category = searchCategories[row]; config.categoryCache.insert(key, {category.id, category.name}); save();
         stableKey.clear(); autoAttemptKey.clear(); setStatus("已在本機連結：" + localGameChoice->currentText() + " → " + category.name, Client::StatusLevel::Success); scan();
     });
+    searchTimer.setSingleShot(true); searchTimer.setInterval(400);
     auto doSearch = [this] {
+        searchTimer.stop();
         if (searchInput->text().trimmed().isEmpty()) {
             searchHint->setText("請先輸入遊戲或分類名稱"); setStatus("請先輸入遊戲或分類名稱"); searchInput->setFocus(); return;
         }
-        if (!client.connected() || searching) return;
+        if (!client.connected() || (searching && searchQuery == searchInput->text().trimmed())) return;
         searchQuery = searchInput->text().trimmed(); searchCategories.clear(); searchList->clear(); cursor.clear(); moreButton->hide();
         searching = true; updateSearch(); searchHint->setText("正在搜尋：" + searchQuery);
-        setStatus("正在搜尋 Twitch 分類…", Client::StatusLevel::Progress); client.search(searchQuery);
+        animate(searchButton); client.search(searchQuery);
     };
+    connect(&searchTimer, &QTimer::timeout, this, doSearch);
     connect(searchButton, &QPushButton::clicked, this, doSearch);
     connect(searchInput, &QLineEdit::returnPressed, this, doSearch);
-    connect(searchInput, &QLineEdit::textChanged, this, &Dock::updateSearch);
+    connect(searchInput, &QLineEdit::textChanged, this, [this] {
+        updateSearch(); searchTimer.stop();
+        if (searchInput->text().trimmed().isEmpty()) {
+            searching = false; searchQuery.clear(); searchCategories.clear(); searchList->clear(); cursor.clear(); moreButton->hide();
+            updateAccount(); searchHint->setText("輸入遊戲或分類名稱…");
+        } else if (client.connected()) searchTimer.start();
+    });
     connect(moreButton, &QPushButton::clicked, this, [this] { searching = true; updateSearch(); moreButton->setEnabled(false); client.search(searchQuery, cursor); });
     connect(applyButton, &QPushButton::clicked, this, &Dock::applySelected);
     connect(searchList, &QListWidget::currentRowChanged, this, [this] { updateAccount(); });
@@ -261,7 +271,8 @@ Dock::Dock(QString settingsDirectory, QWidget *parent, QNetworkAccessManager *tr
     });
     connect(&client, &Client::accountChanged, this, [this] {
         lookupPending = false; lookupAttempted.clear();
-        searchHint->setText(client.connected() ? "輸入名稱後按「搜尋」或 Enter" : "連接 Twitch 後即可搜尋與更新分類");
+        searchTimer.stop();
+        searchHint->setText(client.connected() ? "輸入名稱即可搜尋，也可按搜尋或 Enter" : "連接 Twitch 後即可搜尋與更新分類");
     });
     connect(&client, &Client::accountChanged, this, &Dock::updateAccount);
     connect(&client, &Client::status, this, [this](const QString &text, Client::StatusLevel level) {
@@ -270,10 +281,11 @@ Dock::Dock(QString settingsDirectory, QWidget *parent, QNetworkAccessManager *tr
     });
     connect(&client, &Client::activity, this, &Dock::addActivity);
     connect(&client, &Client::searchFinished, this, [this] {
-        if (searching) searchHint->setText("搜尋已結束，請查看結果或上方狀態");
+        if (searching && !searchInput->text().trimmed().isEmpty()) searchHint->setText("搜尋已結束，請查看結果或上方狀態");
         searching = false; updateSearch(); moreButton->setEnabled(true);
     });
     connect(&client, &Client::results, this, [this](const QVector<Category> &list, const QString &next) {
+        if (searchInput->text().trimmed().isEmpty() || searchInput->text().trimmed() != searchQuery) return;
         for (const auto &c : list) {
             bool exists = false; for (const auto &old : searchCategories) if (old.id == c.id) exists = true;
             if (exists) continue;
@@ -282,8 +294,7 @@ Dock::Dock(QString settingsDirectory, QWidget *parent, QNetworkAccessManager *tr
         cursor = next; moreButton->setVisible(!cursor.isEmpty());
         searchList->setFixedHeight(std::clamp(static_cast<int>(searchCategories.size()) * 72 + 8, 90, 240));
         searchHint->setText(searchCategories.isEmpty() ? "沒有符合的分類，試試其他名稱" : QString("找到 %1 個分類").arg(searchCategories.size()));
-        setStatus(searchHint->text(), searchCategories.isEmpty() ? Client::StatusLevel::Notice : Client::StatusLevel::Success);
-        updateAccount();
+        updateAccount(); animate(searchList);
     });
     connect(&client, &Client::currentChanged, this, [this] {
         const auto c = client.current(); currentLabel->setText(c.name.isEmpty() ? (client.connected() ? "未設定分類" : "尚未取得") : c.name);
@@ -355,7 +366,7 @@ Dock::~Dock() { stop(); }
 void Dock::stop()
 {
     if (stopped) return;
-    stopped = true; scanTimer.stop(); refreshTimer.stop(); client.shutdown(); updater.cancel();
+    stopped = true; scanTimer.stop(); refreshTimer.stop(); searchTimer.stop(); client.shutdown(); updater.cancel();
     if (suggestionPrompt) suggestionPrompt->close();
 
     watcher.disconnect(this); watcher.waitForFinished();
@@ -438,11 +449,13 @@ void Dock::notifySuggestion(const Candidate &candidate)
 {
     const bool idle = candidate.executable == "@idle";
     if (suggestionPrompt) suggestionPrompt->close();
-    auto *prompt = new QMessageBox(QMessageBox::Information, "偵測到遊戲 · 分類更新建議",
+    auto *prompt = new QMessageBox(config.quietMode ? QMessageBox::NoIcon : QMessageBox::Information, "偵測到遊戲 · 分類更新建議",
         QString("偵測到：%1\n目前 Twitch 分類：%2\n%3")
             .arg(candidate.name, client.current().name.isEmpty() ? "尚未取得" : client.current().name,
                  config.developerMode ? "開發者模式：只預演，不修改 Twitch。" : "要更新直播分類嗎？"), QMessageBox::NoButton, this);
     suggestionPrompt = prompt; prompt->setObjectName("categorySuggestionPrompt");
+    prompt->setProperty("quietNotification", config.quietMode);
+    if (config.quietMode) prompt->setOption(QMessageBox::Option::DontUseNativeDialog);
     prompt->setProperty("idleSuggestion", idle);
     if (idle) {
         suggestionSession.idleNotified = true;
@@ -465,6 +478,11 @@ void Dock::notifySuggestion(const Candidate &candidate)
         else if (config.consented() && client.connected() && !client.busy()) { addActivity("使用者確認建議：" + candidate.name); client.apply({candidate.id, candidate.name, {}}); }
     });
     prompt->show();
+    if (config.quietMode) {
+        const auto hwnd = GetAncestor(reinterpret_cast<HWND>(window()->winId()), GA_ROOTOWNER);
+        FLASHWINFO flash{sizeof(FLASHWINFO), hwnd, FLASHW_TRAY | FLASHW_TIMERNOFG, 3, 0};
+        FlashWindowEx(&flash);
+    }
 }
 void Dock::updateUnknown(const Processes &processes)
 {
@@ -523,7 +541,7 @@ void Dock::reviewUnknown()
     connect(search, &QPushButton::clicked, &dialog, [&] {
         if (!client.connected() || !config.consented()) { QMessageBox::information(&dialog, "搜尋", "請先完成同意並連接 Twitch；既有收藏可離線確認。"); return; }
         if (gameName->text().trimmed().isEmpty()) { gameName->setFocus(); return; }
-        searchQuery = gameName->text().trimmed(); searchInput->setText(searchQuery); searching = true; updateSearch(); search->setEnabled(false); lookupStatus->setText("正在向 Twitch 搜尋…"); client.search(searchQuery);
+        searchQuery = gameName->text().trimmed(); searchInput->setText(searchQuery); searchTimer.stop(); searching = true; updateSearch(); search->setEnabled(false); lookupStatus->setText("正在向 Twitch 搜尋…"); client.search(searchQuery);
     });
     auto *advancedToggle = button("進階辨識資訊 ▸"); advancedToggle->setCheckable(true); layout->addWidget(advancedToggle);
     auto *advanced = new QWidget; auto *scope = new QVBoxLayout(advanced); layout->addWidget(advanced); advanced->hide(); connect(advancedToggle, &QPushButton::toggled, advanced, &QWidget::setVisible);
@@ -877,6 +895,7 @@ void Dock::settingsDialog()
     auto *multi = new QComboBox; multi->addItems({"前景遊戲優先", "每次由我選擇", "自訂優先順序（數字較大優先）"}); multi->setCurrentIndex(config.multiGame); policy->addWidget(multi);
 
     auto *notify = detection; auto *notifications = new QCheckBox("分類不同時顯示更新詢問／建議視窗"); notifications->setChecked(config.notifications); notify->addWidget(notifications);
+    auto *quiet = new QCheckBox("靜音模式：提醒不發聲，只閃爍 OBS 工作列"); quiet->setObjectName("quietMode"); quiet->setChecked(config.quietMode); notify->addWidget(quiet);
     auto *windows = new QCheckBox("Windows 通知（此版本不支援）"); windows->setEnabled(false); notify->addWidget(windows);
     auto *live = new QCheckBox("僅在本機 OBS 串流期間顯示自動建議"); live->setChecked(config.liveOnly); notify->addWidget(live);
     auto *updates = card(layout, "版本與更新"); updates->addWidget(label("目前版本：" + QString::fromLatin1(PluginVersion) + "\nGitHub：" + QString::fromLatin1(UpdateRepository)));
@@ -934,7 +953,7 @@ void Dock::settingsDialog()
         if (newId != config.clientId) client.logout();
         config.clientId = newId; config.theme = themeBox->currentIndex(); config.automatic = update->currentIndex() == 1;
         config.fontFamily = fontBox->currentFont().family(); config.fontSize = fontSize->value(); config.animations = animationBox->isChecked();
-        config.multiGame = multi->currentIndex(); config.notifications = notifications->isChecked(); config.liveOnly = live->isChecked(); config.paused = pause->isChecked();
+        config.multiGame = multi->currentIndex(); config.notifications = notifications->isChecked(); config.quietMode = quiet->isChecked(); config.liveOnly = live->isChecked(); config.paused = pause->isChecked();
         config.developerMode = developerMode->isChecked();
         config.checkUpdates = autoCheck->isChecked(); config.chattingSuggestion = chatting->isChecked(); config.chattingDelay = chattingDelay->value(); config.learnUnknown = learn->isChecked(); config.autoDetect = autoDetect->isChecked(); config.detectLibraries = libraries->isChecked(); config.allowCategoryLookup = lookup->isChecked(); lookupAttempted.clear();
         stableKey.clear(); notificationKey.clear(); if (suggestionPrompt) suggestionPrompt->close();
@@ -1054,6 +1073,7 @@ void Dock::wizard()
     connect(chatting, &QCheckBox::toggled, chattingDelay, &QWidget::setEnabled);
     auto *notice = page("通知偏好", "通知顯示於 OBS Dock。Windows 系統通知在此版本不支援。");
     auto *notify = new QCheckBox("OBS Dock 內通知"); notify->setChecked(config.notifications); notice->layout()->addWidget(notify);
+    auto *quiet = new QCheckBox("靜音模式：提醒不發聲，只閃爍 OBS 工作列"); quiet->setObjectName("quietMode"); quiet->setChecked(config.quietMode); notice->layout()->addWidget(quiet);
     auto *live = new QCheckBox("僅在 OBS 串流時提出自動建議"); live->setChecked(config.liveOnly); notice->layout()->addWidget(live);
     page("完成設定", "完成後可搜尋分類，並在「我的遊戲」選取視窗與分類。你可以隨時在設定修改偏好或重新開啟精靈。");
     connect(&wizard, &QWizard::currentIdChanged, &wizard, [this, &wizard] { if (wizard.currentPage()) animate(wizard.currentPage()); });
@@ -1063,7 +1083,7 @@ void Dock::wizard()
         const auto previous = config;
         config.termsVersion = config.privacyVersion = DocumentVersion;
         config.termsUtc = config.privacyUtc = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
-        config.chattingSuggestion = chatting->isChecked(); config.chattingDelay = chattingDelay->value(); suggestionSession.pause(); config.automatic = autoUpdate->isChecked(); config.notifications = notify->isChecked(); config.liveOnly = live->isChecked(); config.wizardDone = true;
+        config.chattingSuggestion = chatting->isChecked(); config.chattingDelay = chattingDelay->value(); suggestionSession.pause(); config.automatic = autoUpdate->isChecked(); config.notifications = notify->isChecked(); config.quietMode = quiet->isChecked(); config.liveOnly = live->isChecked(); config.wizardDone = true;
         if (!save()) { config = previous; setStatus("無法儲存設定，尚未標記設定完成。", Client::StatusLevel::Error); }
         updateAccount();
     }

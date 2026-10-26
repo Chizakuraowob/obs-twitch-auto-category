@@ -62,7 +62,7 @@ private:
     Updater updater;
     QNetworkAccessManager images;
     QFutureWatcher<Processes> watcher;
-    QTimer scanTimer, refreshTimer;
+    QTimer scanTimer, refreshTimer, searchTimer;
     bool searching = false, accountConnecting = false;
     int refreshAngle = 0;
     QLabel *accountIndicator, *statusIndicator;

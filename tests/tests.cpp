@@ -217,9 +217,11 @@ int main(int argc, char **argv)
         CHECK(Settings::fromJson({}).favorites.isEmpty()); CHECK(!Settings::fromJson({}).developerMode);
     });
     run("font preferences and legacy wizard migration", [] {
-        Settings s; s.fontFamily = "Segoe UI"; s.fontSize = 20; s.animations = false; s.wizardDone = true;
+        Settings s; s.fontFamily = "Segoe UI"; s.fontSize = 20; s.animations = false; s.wizardDone = true; s.quietMode = true;
         auto loaded = Settings::fromJson(s.json());
-        CHECK(loaded.fontFamily == s.fontFamily); CHECK(loaded.fontSize == 20); CHECK(!loaded.animations); CHECK(loaded.wizardDone);
+        CHECK(loaded.fontFamily == s.fontFamily); CHECK(loaded.fontSize == 20); CHECK(!loaded.animations); CHECK(loaded.wizardDone); CHECK(loaded.quietMode);
+        CHECK(!Settings::fromJson({}).quietMode);
+        CHECK(!Settings::fromJson({{"quietMode", false}}).quietMode);
         auto old = s.json(); old.remove("wizardRevision"); old["fontSize"] = 999;
         loaded = Settings::fromJson(old); CHECK(loaded.wizardDone); CHECK(loaded.fontSize == 22);
         old["fontSize"] = -1; CHECK(Settings::fromJson(old).fontSize == 12);

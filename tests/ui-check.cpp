@@ -85,6 +85,16 @@ struct DockTestAccess {
     static void lightTheme(Dock &dock) { dock.config.theme = 1; dock.theme(); }
     static void noAnimation(Dock &dock) { dock.config.animations = false; dock.theme(); }
     static bool refreshAnimating(Dock &dock) { return dock.refreshTimer.isActive(); }
+    static bool quietPrompt(Dock &dock, bool quiet, bool idle, const QString &path) {
+        const bool previous = dock.config.quietMode; dock.config.quietMode = quiet;
+        dock.notifySuggestion({idle ? "@idle" : "fixture.exe", idle ? "509658" : "42", idle ? "Just Chatting" : "Minecraft", 0});
+        auto *prompt = dock.suggestionPrompt.data();
+        const bool valid = prompt && prompt->isVisible() && prompt->property("quietNotification").toBool() == quiet &&
+            prompt->icon() == (quiet ? QMessageBox::NoIcon : QMessageBox::Information) &&
+            prompt->testOption(QMessageBox::Option::DontUseNativeDialog) == quiet && prompt->testAttribute(Qt::WA_ShowWithoutActivating);
+        const bool captured = path.isEmpty() || (prompt && prompt->grab().save(path));
+        if (prompt) prompt->reject(); dock.config.quietMode = previous; return valid && captured;
+    }
     static bool preview(Dock &dock, const QString &path) { return dock.contentBody->grab().save(path); }
     static bool layoutOrder(Dock &dock) {
         auto *layout = dock.contentBody->layout(); int previous = -1;
@@ -218,13 +228,22 @@ static bool connectedUi(const QString &output)
     UI_CHECK(input && search && search->isEnabled() && !search->property("primary").toBool());
     input->setText("   "); search->click();
     UI_CHECK(network.searches == 0 && dock.findChild<QLabel *>("operationStatus")->text().contains("請先輸入"));
-    input->setText("Minecraft"); settle(550);
+    input->setText("Minecraft");
     UI_CHECK(network.searches == 0 && search->property("primary").toBool());
+    UI_CHECK(wait([&] { return network.searches == 1; }));
+    UI_CHECK(wait([&] { return search->isEnabled(); }));
     search->click(); search->click();
-    UI_CHECK(network.searches == 1 && !search->isEnabled());
+    UI_CHECK(network.searches == 2 && !search->isEnabled());
     UI_CHECK(wait([&] { return search->isEnabled(); }));
     QKeyEvent enter(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier); QApplication::sendEvent(input, &enter);
-    UI_CHECK(network.searches == 2); UI_CHECK(wait([&] { return search->isEnabled(); }));
+    UI_CHECK(network.searches == 3); UI_CHECK(wait([&] { return search->isEnabled(); }));
+    settle(450); UI_CHECK(network.searches == 3);
+    input->setText("old request"); UI_CHECK(wait([&] { return network.searches == 4; }));
+    input->clear(); settle(300);
+    UI_CHECK(dock.findChild<QListWidget *>("searchResults")->count() == 0 && !search->property("primary").toBool());
+    input->setText("Minecraft"); search->click();
+    UI_CHECK(network.searches == 5); UI_CHECK(wait([&] { return search->isEnabled(); }));
+    settle(450); UI_CHECK(network.searches == 5);
     auto *refresh = dock.findChild<QPushButton *>("refreshCurrent"); UI_CHECK(refresh && refresh->isEnabled());
     const auto reads = network.reads; refresh->click(); refresh->click();
     UI_CHECK(network.reads == reads + 1 && refresh->property("refreshing").toBool() && !refresh->isEnabled());
@@ -246,6 +265,29 @@ static bool connectedUi(const QString &output)
         if (dialog) dialog->reject();
     });
     settingsButton->click(); UI_CHECK(accountEntry);
+    bool quietSaved = false;
+    QTimer::singleShot(50, &dock, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        auto *setup = dialog ? dialog->findChild<QPushButton *>("openSetupWizard") : nullptr;
+        if (setup) setup->click(); else if (dialog) dialog->reject();
+    });
+    QTimer::singleShot(100, &dock, [&] {
+        auto *wizard = qobject_cast<QWizard *>(QApplication::activeModalWidget()); if (!wizard) return;
+        auto *quiet = wizard->findChild<QCheckBox *>("quietMode"); if (!quiet) { wizard->reject(); return; }
+        quiet->setChecked(true);
+        for (int i = 0; i < 6; ++i) {
+            if (wizard->currentId() == 2) for (auto *box : wizard->currentPage()->findChildren<QCheckBox *>()) box->setChecked(true);
+            if (wizard->currentId() == 5) wizard->grab().save(output + "/quiet-wizard.png");
+            wizard->next();
+        }
+        quietSaved = wizard->currentId() == 6;
+        if (quietSaved) wizard->button(QWizard::FinishButton)->click(); else wizard->reject();
+    });
+    settingsButton->click();
+    UI_CHECK(quietSaved && tca::Settings::load(temp.filePath("settings.json"), &error).quietMode);
+    UI_CHECK(tca::DockTestAccess::quietPrompt(dock, true, false, output + "/quiet-suggestion.png"));
+    UI_CHECK(tca::DockTestAccess::quietPrompt(dock, true, true, {}));
+    UI_CHECK(tca::DockTestAccess::quietPrompt(dock, false, false, {}));
     settle(160); UI_CHECK(tca::DockTestAccess::preview(dock, output + "/connected-dark.png"));
     tca::DockTestAccess::lightTheme(dock); settle(160); UI_CHECK(tca::DockTestAccess::preview(dock, output + "/connected-light.png"));
     network.failRead = true; refresh->click(); UI_CHECK(wait([&] { return !client.readingCurrent(); }));
@@ -320,6 +362,8 @@ int main(int argc, char **argv)
                     open->click();
                 }
                 auto *size = dialog->findChild<QSpinBox *>("fontSize");
+                auto *quiet = dialog->findChild<QCheckBox *>("quietMode");
+                if (!quiet || quiet->isChecked()) result = 81; else quiet->setChecked(true);
                 if (!size) result = 13;
                 else size->setValue(18);
                 auto *delay = dialog->findChild<QSpinBox *>("chattingDelay");
@@ -341,6 +385,7 @@ int main(int argc, char **argv)
                 QApplication::sendEvent(save, &press); QApplication::sendEvent(save, &release);
                 if (tca::Settings::load(temp.filePath("settings.json"), &error).fontSize != 18) result = 14;
                 if (tca::Settings::load(temp.filePath("settings.json"), &error).chattingDelay != 45) result = 42;
+                if (!tca::Settings::load(temp.filePath("settings.json"), &error).quietMode) result = 82;
             }
         });
         settingsButton->click();
@@ -351,6 +396,7 @@ int main(int argc, char **argv)
         QTimer::singleShot(200, &app, [&] {
             auto *wizard = qobject_cast<QWizard *>(app.activeModalWidget());
             if (!wizard) { result = 7; return; }
+            auto *quiet = wizard->findChild<QCheckBox *>("quietMode"); if (!quiet || !quiet->isChecked()) result = 83;
             auto *delay = wizard->findChild<QSpinBox *>("chattingDelay"); if (!delay || delay->value() != 45) result = 43;
             if (!hasDelayHint(wizard)) result = 50;
             if (delay) { typeSeconds(delay, "120"); if (delay->value() != 120) result = 51; }

@@ -88,7 +88,7 @@ QJsonObject Settings::json() const
     for (const auto &f : favorites) savedFavorites.append(QJsonObject{{"id", f.id}, {"name", f.name}});
     QJsonObject cache; for (auto it = categoryCache.begin(); it != categoryCache.end(); ++it) cache[it.key()] = QJsonObject{{"id", it->id}, {"name", it->name}};
     return {{"schema", 1}, {"savedByVersion", PluginVersion}, {"clientId", clientId}, {"theme", theme}, {"fontFamily", fontFamily}, {"fontSize", fontSize}, {"animations", animations}, {"automatic", automatic},
-        {"notifications", notifications}, {"liveOnly", liveOnly}, {"paused", paused}, {"multiGame", multiGame},
+        {"notifications", notifications}, {"quietMode", quietMode}, {"liveOnly", liveOnly}, {"paused", paused}, {"multiGame", multiGame},
         {"developerMode", developerMode}, {"favorites", savedFavorites},
         {"autoDetect", autoDetect}, {"detectLibraries", detectLibraries}, {"allowCategoryLookup", allowCategoryLookup}, {"categoryCache", cache},
         {"learnUnknown", learnUnknown}, {"recognitionRules", recognitionJson(recognitionRules)},
@@ -108,6 +108,7 @@ Settings Settings::fromJson(const QJsonObject &o)
     s.animations = o["animations"].toBool(true);
     s.multiGame = std::clamp(o["multiGame"].toInt(1), 0, 2);
     s.automatic = o["automatic"].toBool(); s.notifications = o["notifications"].toBool(true);
+    s.quietMode = o["quietMode"].toBool(false);
     s.liveOnly = o["liveOnly"].toBool(true); s.paused = o["paused"].toBool();
     s.developerMode = o["developerMode"].toBool();
     s.autoDetect = o["autoDetect"].toBool(true); s.detectLibraries = o["detectLibraries"].toBool(true); s.allowCategoryLookup = o["allowCategoryLookup"].toBool();

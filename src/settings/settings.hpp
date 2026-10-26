@@ -29,6 +29,7 @@ struct Settings {
     bool animations = true;
     int theme = 0; // system, light, dark
     bool automatic = false, notifications = true, liveOnly = true, paused = false;
+    bool quietMode = false;
     bool developerMode = false;
     bool autoDetect = true, detectLibraries = true, allowCategoryLookup = false;
     bool learnUnknown = true;
