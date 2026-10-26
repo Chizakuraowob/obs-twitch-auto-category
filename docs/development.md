@@ -83,7 +83,7 @@ Windows Smart App Control 會檢查被 OBS 載入的 DLL，不只 MSI。正式�
 
 ## Git 與官方參考
 
-衍生自 OBS 官方 [obs-plugintemplate](https://github.com/obsproject/obs-plugintemplate)，保留 GPL-2.0-or-later。專案使用本機 Git main；upstream 指向官方模板。尚未設定公開專案 remote 或推送。
+衍生自 OBS 官方 [obs-plugintemplate](https://github.com/obsproject/obs-plugintemplate)，保留 GPL-2.0-or-later。官方專案儲存庫為 [Chizakuraowob/obs-twitch-auto-category](https://github.com/Chizakuraowob/obs-twitch-auto-category)，開發分支為 main；本機 upstream 可保留指向官方模板。
 
 - [Twitch Device Code OAuth](https://dev.twitch.tv/docs/authentication/getting-tokens-oauth/#device-code-grant-flow)
 - [Token 驗證](https://dev.twitch.tv/docs/authentication/validate-tokens/)
@@ -99,7 +99,7 @@ Windows Smart App Control 會檢查被 OBS 載入的 DLL，不只 MSI。正式�
 
 更新來源由 CMake `TCA_UPDATE_REPOSITORY` 固定為 `Chizakuraowob/obs-twitch-auto-category`；衍生專案應改成自己的儲存庫，留空可停用。檢查 `/releases/latest`，只接受 `vX.Y.Z` 或 `X.Y.Z` 的穩定版。Release 請附上 `twitch-category-assistant-X.Y.Z-windows-x64.msi`；GitHub API 必須提供該資產的 SHA-256 digest 與大小，否則拒絕內建下載。打包腳本亦產生 `.sha256` 供人工核對。
 
-外掛下載後檢查雜湊及本機 Windows 簽章狀態，但沒有配置作者身分釘選，因此不自動執行安裝。請關閉 OBS 再手動執行 MSI。發布前仍需測試簽章、升級與實際安裝；本次不會自動建立 GitHub Release 或推送儲存庫。
+外掛下載後檢查雜湊及本機 Windows 簽章狀態，但沒有配置作者身分釘選，因此不自動執行安裝。請關閉 OBS 再手動執行 MSI。發布前仍需測試簽章、升級與實際安裝；一般 CI 不會建立 Release，草稿需由維護者手動選擇版本 tag 啟動。
 
 MSI 原生檢查工具不依賴 Qt，不發送關閉訊息或終止程序。`tca-installer-test.exe MSI_PATH CHECK_DLL_PATH FIXTURE_EXE_PATH` 在真實 MSI session 中直接呼叫程序檢查函式，測試靜默阻擋、取消、重試，不執行檔案安裝。假 OBS fixture 只等待本測試的結束事件，不是實際 OBS。
 
