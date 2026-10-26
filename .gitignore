@@ -1,6 +1,10 @@
 # Exclude everything
 /*
 
+#Exclude 
+./docs/backlog.md
+./docs/edit-release-metadata.md
+
 # Except for default project files
 !/.github
 !/build-aux
