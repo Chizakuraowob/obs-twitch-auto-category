@@ -18,7 +18,7 @@ namespace tca {
 class Dock : public QWidget {
     Q_OBJECT
 public:
-    explicit Dock(QString settingsDirectory, QWidget *parent = nullptr);
+    explicit Dock(QString settingsDirectory, QWidget *parent = nullptr, QNetworkAccessManager *transport = nullptr);
     ~Dock() override;
     void setStreaming(bool active);
     void stop();
@@ -37,6 +37,8 @@ private:
     void about();
     void document(const QString &kind);
     void updateAccount();
+    void updateSearch();
+    void updateRefresh();
     void addActivity(const QString &text);
     void scan();
     void processScan();
@@ -51,7 +53,7 @@ private:
     bool rememberRecognition(const RecognitionRule &rule);
     void fetchArt(const Category &category);
 
-    void setStatus(const QString &message);
+    void setStatus(const QString &message, Client::StatusLevel level = Client::StatusLevel::Notice);
     void animate(QWidget *widget);
     QString effectiveClientId() const;
     QString directory, settingsPath;
@@ -60,7 +62,11 @@ private:
     Updater updater;
     QNetworkAccessManager images;
     QFutureWatcher<Processes> watcher;
-    QTimer scanTimer, searchTimer;
+    QTimer scanTimer, refreshTimer;
+    bool searching = false, accountConnecting = false;
+    int refreshAngle = 0;
+    QLabel *accountIndicator, *statusIndicator;
+    QPushButton *refreshButton;
     QLabel *accountLabel, *currentLabel, *currentArt, *syncLabel, *statusLabel, *suggestionLabel, *searchHint;
     QLineEdit *searchInput;
     QListWidget *searchList, *activityList;

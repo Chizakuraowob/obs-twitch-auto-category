@@ -27,6 +27,7 @@ Client::~Client() { shutdown(); }
 void Client::shutdown()
 {
     ++generation; pollTimer.stop(); validationTimer.stop();
+    if (reading) { reading = false; emit currentReadChanged(); }
     const auto pending = requests;
     for (auto *reply : pending) { disconnect(reply, nullptr, this, nullptr); reply->abort(); reply->deleteLater(); }
     requests.clear();
@@ -103,9 +104,9 @@ void Client::login(const QString &id)
 {
     resetSession(); clientId = id.trimmed();
     if (!QRegularExpression("^[a-zA-Z0-9]{1,128}$").match(clientId).hasMatch()) {
-        emit status("請先設定有效的 Twitch Public Client ID"); emit authorizationFinished(); return;
+        emit status("請先設定有效的 Twitch Public Client ID", StatusLevel::Error); emit authorizationFinished(); return;
     }
-    emit status("正在取得 Twitch 裝置授權碼…");
+    emit status("正在取得 Twitch 裝置授權碼…", StatusLevel::Progress);
     request("POST", QUrl("https://id.twitch.tv/oauth2/device"),
         form({{"client_id", clientId}, {"scopes", "channel:manage:broadcast"}}), false, [this](const Response &r) {
         const auto o = r.object;
@@ -115,7 +116,7 @@ void Client::login(const QString &id)
             o["user_code"].toString().isEmpty() || seconds <= 0 || seconds > 86400 ||
             uri.scheme() != "https" || uri.host() != "www.twitch.tv" || uri.path() != "/activate" ||
             !uri.userInfo().isEmpty() || (uri.port() != -1 && uri.port() != 443)) {
-            emit status(failure(r)); emit authorizationFinished(); return;
+            emit status(failure(r), StatusLevel::Error); emit authorizationFinished(); return;
         }
         deviceCode = o["device_code"].toString();
         pollInterval = std::clamp(o["interval"].toInt(5), 5, 60);
@@ -142,24 +143,24 @@ void Client::pollDevice()
 {
     if (deviceCode.isEmpty()) return;
     if (QDateTime::currentDateTimeUtc() >= deviceDeadline) {
-        deviceCode.clear(); emit authorizationFinished(); emit status("授權碼已到期，請重新登入"); return;
+        deviceCode.clear(); emit authorizationFinished(); emit status("授權碼已到期，請重新登入", StatusLevel::Error); return;
     }
     request("POST", QUrl("https://id.twitch.tv/oauth2/token"), form({{"client_id", clientId},
         {"device_code", deviceCode}, {"scopes", "channel:manage:broadcast"},
         {"grant_type", "urn:ietf:params:oauth:grant-type:device_code"}}), false, [this](const Response &r) {
         if (QDateTime::currentDateTimeUtc() >= deviceDeadline) {
-            deviceCode.clear(); emit authorizationFinished(); emit status("授權碼已到期，請重新登入"); return;
+            deviceCode.clear(); emit authorizationFinished(); emit status("授權碼已到期，請重新登入", StatusLevel::Error); return;
         }
         if (acceptTokens(r)) {
             deviceCode.clear(); validationTimer.start(); emit authorizationFinished();
-            emit status("已取得授權，正在驗證帳號…"); validate(false); return;
+            emit status("已取得授權，正在驗證帳號…", StatusLevel::Progress); validate(false); return;
         }
         const auto error = r.object["message"].toString(r.object["error"].toString());
         if (error == "authorization_pending" || error == "slow_down" || r.code == 429 || r.code >= 500 || r.networkError || !r.code) {
             if (error == "slow_down" || r.code == 429) pollInterval = std::min(60, pollInterval + 5);
             pollTimer.start(pollInterval * 1000); return;
         }
-        deviceCode.clear(); emit authorizationFinished(); emit status("授權未完成或已被拒絕，請重新登入");
+        deviceCode.clear(); emit authorizationFinished(); emit status("授權未完成或已被拒絕，請重新登入", StatusLevel::Error);
     });
 }
 void Client::validate(bool allowRefresh)
@@ -171,14 +172,14 @@ void Client::validate(bool allowRefresh)
         if (r.code == 200 && !r.networkError && r.validJson && o["client_id"].toString() == clientId &&
             validCategoryId(o["user_id"].toString()) && o["scopes"].toArray().contains("channel:manage:broadcast") && o["expires_in"].toInt() > 0) {
             userId = o["user_id"].toString(); loginName = o["login"].toString(); ready = true;
-            emit accountChanged(); emit status("Twitch 帳號已連線"); readCurrent();
+            emit accountChanged(); emit status("Twitch 帳號已連線", StatusLevel::Success); readCurrent();
         } else {
             ready = false; emit accountChanged();
             if (r.code == 200 || r.code == 401) {
                 tokens = {}; validationTimer.stop();
                 if (persistTokens) Credentials::erase(clientId);
-                emit status("授權帳號、Client ID 或權限驗證失敗，請重新登入");
-            } else emit status("暫時無法驗證授權，請重新連線；" + failure(r));
+                emit status("授權帳號、Client ID 或權限驗證失敗，請重新登入", StatusLevel::Error);
+            } else emit status("暫時無法驗證授權，請重新連線；" + failure(r), StatusLevel::Error);
         }
     });
 }
@@ -186,7 +187,7 @@ void Client::refresh()
 {
     if (refreshing) return;
     ready = false; emit accountChanged();
-    if (tokens.refresh.isEmpty()) { emit status("請重新登入 Twitch"); return; }
+    if (tokens.refresh.isEmpty()) { emit status("請重新登入 Twitch", StatusLevel::Error); return; }
     refreshing = true;
     request("POST", QUrl("https://id.twitch.tv/oauth2/token"), form({{"client_id", clientId},
         {"grant_type", "refresh_token"}, {"refresh_token", tokens.refresh}}), false, [this](const Response &r) {
@@ -195,7 +196,7 @@ void Client::refresh()
         // A lost response may already have consumed a one-time refresh token. Never retry it blindly.
         tokens = {}; validationTimer.stop();
         if (persistTokens) Credentials::erase(clientId);
-        emit status("無法更新授權，請重新登入 Twitch");
+        emit status("無法更新授權，請重新登入 Twitch", StatusLevel::Error);
     });
 }
 void Client::logout()
@@ -203,7 +204,7 @@ void Client::logout()
     const auto access = tokens.access; const auto id = clientId;
     const bool erased = !persistTokens || Credentials::erase(id);
     resetSession(); emit authorizationFinished();
-    emit status(erased ? "已登出並清除本機憑證" : "已斷開連線，但本機憑證清除失敗");
+    emit status(erased ? "已登出並清除本機憑證" : "已斷開連線，但本機憑證清除失敗", erased ? StatusLevel::Notice : StatusLevel::Error);
     if (access.isEmpty()) return;
     request("POST", QUrl("https://id.twitch.tv/oauth2/revoke"), form({{"client_id", id}, {"token", access}}), false,
         [this](const Response &r) { emit activity(r.code == 200 && !r.networkError ? "Twitch 授權已撤銷" : "未能確認遠端撤銷；可至 Twitch 連線設定移除此應用程式"); });
@@ -225,7 +226,7 @@ void Client::search(const QString &query, const QString &cursor)
         if (seq != searchGeneration) return;
         emit searchFinished();
         if (r.code != 200 || r.networkError || !r.validJson || !r.object["data"].isArray()) {
-            emit status(failure(r)); if (r.code == 401) refresh(); return;
+            emit status(failure(r), StatusLevel::Error); if (r.code == 401) refresh(); return;
         }
         QVector<Category> list;
         for (const auto &v : r.object["data"].toArray()) { Category c; if (parseCategory(v.toObject(), c)) list.append(c); }
@@ -248,25 +249,28 @@ static bool channel(const Response &r, const QString &user, Category &c)
 }
 void Client::readCurrent()
 {
-    if (!ready || updating) return;
+    if (!ready || updating || reading) return;
+    reading = true; emit currentReadChanged();
+    emit status("正在重新整理目前分類…", StatusLevel::Progress);
     const auto operation = updateGeneration;
     request("GET", channelUrl(), {}, true, [this, operation](const Response &r) {
+        reading = false; emit currentReadChanged();
         if (operation != updateGeneration || updating) return;
         Category c;
-        if (channel(r, userId, c)) { currentCategory = c; emit currentChanged(); emit status("已讀取目前分類"); loadCurrentArt(); }
-        else { emit status("無法取得最新分類；" + failure(r)); if (r.code == 401) refresh(); }
+        if (channel(r, userId, c)) { currentCategory = c; emit currentChanged(); emit status("已讀取目前分類", StatusLevel::Success); loadCurrentArt(); }
+        else { emit status("無法取得最新分類；" + failure(r), StatusLevel::Error); if (r.code == 401) refresh(); }
     });
 }
 void Client::apply(const Category &category)
 {
     if (!ready || updating || !validCategoryId(category.id)) return;
     updating = true; const auto operation = ++updateGeneration;
-    emit status("正在送出分類更新…");
+    emit status("正在送出分類更新…", StatusLevel::Progress);
     request("PATCH", channelUrl(), QJsonDocument(QJsonObject{{"game_id", category.id}}).toJson(QJsonDocument::Compact), true,
         [this, category, operation](const Response &r) {
         if (operation != updateGeneration) return;
         if (r.code == 204 && !r.networkError) {
-            emit status("已送出更新請求，正在確認結果"); confirm(category, operation, 0);
+            emit status("已送出更新請求，正在確認結果", StatusLevel::Progress); confirm(category, operation, 0);
         } else if (r.networkError || r.code == 0 || r.code >= 500) {
             emit status("更新回應不確定，正在讀取分類確認"); confirm(category, operation, 0);
         } else {
@@ -292,10 +296,10 @@ void Client::confirm(Category target, quint64 operation, int attempt)
         Category actual;
         if (channel(r, userId, actual)) {
             currentCategory = actual; emit currentChanged();
-            if (actual.id == target.id) { finishUpdate("更新成功，目前分類：" + actual.name); loadCurrentArt(); return; }
+            if (actual.id == target.id) { finishUpdate("更新成功，目前分類：" + actual.name, StatusLevel::Success); loadCurrentArt(); return; }
         }
         if (r.code == 401 || r.code == 403 || r.code == 429 || attempt >= 3) {
-            finishUpdate("暫時無法確認分類是否更新；最後已知分類：" + currentCategory.name);
+            finishUpdate("暫時無法確認分類是否更新；最後已知分類：" + currentCategory.name, StatusLevel::Notice);
             if (r.code == 401) refresh();
             return;
         }
@@ -305,9 +309,9 @@ void Client::confirm(Category target, quint64 operation, int attempt)
         });
     });
 }
-void Client::finishUpdate(const QString &message)
+void Client::finishUpdate(const QString &message, StatusLevel level)
 {
-    updating = false; emit status(message); emit activity(message);
+    updating = false; emit status(message, level); emit activity(message);
 }
 void Client::loadCurrentArt()
 {

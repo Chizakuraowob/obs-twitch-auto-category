@@ -17,6 +17,8 @@ struct Response {
 class Client : public QObject {
     Q_OBJECT
 public:
+    enum class StatusLevel { Notice, Progress, Success, Error };
+    Q_ENUM(StatusLevel)
     explicit Client(QObject *parent = nullptr, QNetworkAccessManager *transport = nullptr, bool persist = true);
     ~Client() override;
     void restore(const QString &clientId);
@@ -30,6 +32,7 @@ public:
     void apply(const Category &category);
     bool connected() const { return ready; }
     bool busy() const { return updating; }
+    bool readingCurrent() const { return reading; }
     QString userName() const { return loginName; }
     Category current() const { return currentCategory; }
     static bool parseCategory(const QJsonObject &object, Category &category);
@@ -40,8 +43,9 @@ signals:
     void results(const QVector<tca::Category> &categories, const QString &cursor);
     void searchFinished();
     void currentChanged();
+    void currentReadChanged();
     void categoryResolved(const QString &key, const tca::Category &category);
-    void status(const QString &message);
+    void status(const QString &message, tca::Client::StatusLevel level = StatusLevel::Notice);
     void activity(const QString &message);
 private:
     using Callback = std::function<void(const Response &)>;
@@ -52,7 +56,7 @@ private:
     void refresh();
     bool acceptTokens(const Response &response);
     void confirm(Category target, quint64 operation, int attempt);
-    void finishUpdate(const QString &message);
+    void finishUpdate(const QString &message, StatusLevel level = StatusLevel::Error);
     void loadCurrentArt();
     QString failure(const Response &response) const;
     QUrl channelUrl() const;
@@ -66,7 +70,7 @@ private:
     qint64 helixBlockedUntil = 0;
     quint64 generation = 0, searchGeneration = 0, updateGeneration = 0;
     int pollInterval = 5;
-    bool ready = false, updating = false, refreshing = false, persistTokens;
+    bool ready = false, updating = false, refreshing = false, reading = false, persistTokens;
 };
 }
 Q_DECLARE_METATYPE(tca::Category)

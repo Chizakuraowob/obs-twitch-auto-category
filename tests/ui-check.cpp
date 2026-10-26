@@ -29,9 +29,72 @@
 #include <QTabWidget>
 #include <QPromise>
 #include <QJsonDocument>
+#include <QJsonArray>
+#include <QElapsedTimer>
+#include <QNetworkReply>
+#include <QVBoxLayout>
+#include <QStyle>
+#include <QThread>
+#include <cstring>
+
+class UiReply : public QNetworkReply {
+public:
+    UiReply(const QNetworkRequest &request, QByteArray bytes, int status, int delay, QObject *parent)
+        : QNetworkReply(parent), bytes(std::move(bytes)) {
+        setRequest(request); setUrl(request.url()); setAttribute(QNetworkRequest::HttpStatusCodeAttribute, status);
+        if (status >= 400) setError(ContentAccessDenied, "fixture error");
+        open(QIODevice::ReadOnly | QIODevice::Unbuffered);
+        QTimer::singleShot(delay, this, [this] { if (!isFinished()) { setFinished(true); emit readyRead(); emit finished(); } });
+    }
+    void abort() override { if (!isFinished()) { setFinished(true); setError(OperationCanceledError, "cancelled"); emit finished(); } }
+    qint64 bytesAvailable() const override { return bytes.size() - offset + QIODevice::bytesAvailable(); }
+protected:
+    qint64 readData(char *buffer, qint64 maximum) override {
+        const auto count = qMin(maximum, static_cast<qint64>(bytes.size()) - offset);
+        if (!count) return -1;
+        std::memcpy(buffer, bytes.constData() + offset, static_cast<size_t>(count)); offset += count; return count;
+    }
+private:
+    QByteArray bytes; qint64 offset = 0;
+};
+class UiTransport : public QNetworkAccessManager {
+public:
+    QString clientId; int searches = 0, reads = 0; bool failRead = false, unexpected = false;
+protected:
+    QNetworkReply *createRequest(Operation, const QNetworkRequest &request, QIODevice *) override {
+        const auto path = request.url().path(); QByteArray body; int status = 200, delay = 0;
+        if (path == "/oauth2/device") body = R"({"device_code":"fixture","user_code":"TEST","verification_uri":"https://www.twitch.tv/activate","interval":5,"expires_in":60})";
+        else if (path == "/oauth2/token") body = R"({"access_token":"fixture-access","refresh_token":"fixture-refresh","token_type":"bearer"})";
+        else if (path == "/oauth2/validate") body = QJsonDocument(QJsonObject{{"client_id", clientId}, {"user_id", "123"}, {"login", "fixture_streamer"}, {"scopes", QJsonArray{"channel:manage:broadcast"}}, {"expires_in", 3600}}).toJson();
+        else if (path == "/helix/channels") { ++reads; delay = 300; status = failRead ? 503 : 200; body = R"({"data":[{"broadcaster_id":"123","game_id":"42","game_name":"Minecraft"}]})"; }
+        else if (path == "/helix/search/categories") { ++searches; delay = 180; body = R"({"data":[{"id":"42","name":"Minecraft","box_art_url":""}],"pagination":{}})"; }
+        else if (path == "/helix/games" || path == "/oauth2/revoke") body = R"({"data":[]})";
+        else { unexpected = true; status = 500; body = "{}"; }
+        return new UiReply(request, body, status, delay, this);
+    }
+};
 
 namespace tca {
 struct DockTestAccess {
+    static Client &twitch(Dock &dock) { return dock.client; }
+    static QString prepareFixture(Dock &dock) {
+        dock.config.clientId = "fixture123"; dock.config.termsVersion = dock.config.privacyVersion = DocumentVersion;
+        dock.config.termsUtc = dock.config.privacyUtc = "2026-10-27T00:00:00Z";
+        dock.config.animations = true; return dock.effectiveClientId();
+    }
+    static void lightTheme(Dock &dock) { dock.config.theme = 1; dock.theme(); }
+    static void noAnimation(Dock &dock) { dock.config.animations = false; dock.theme(); }
+    static bool refreshAnimating(Dock &dock) { return dock.refreshTimer.isActive(); }
+    static bool preview(Dock &dock, const QString &path) { return dock.contentBody->grab().save(path); }
+    static bool layoutOrder(Dock &dock) {
+        auto *layout = dock.contentBody->layout(); int previous = -1;
+        for (const auto &name : {"accountCard", "statusCard", "currentCategoryCard", "suggestionCard", "manualSearchCard"}) {
+            auto *widget = dock.findChild<QWidget *>(name); if (!widget || layout->indexOf(widget) <= previous) return false;
+            previous = layout->indexOf(widget);
+        }
+        return layout->indexOf(dock.activityToggle) > previous;
+    }
+    static bool pausedCopy(Dock &dock) { dock.scan(); return dock.unknownLabel->text() == "自動偵測已暫停"; }
     static bool documents(Dock &dock) { return dock.confirmUpdatedDocuments(); }
     static bool attemptSave(Dock &dock) { return dock.save(); }
     static void developerScan(Dock &dock) {
@@ -125,6 +188,74 @@ static bool hasDelayHint(QWidget *widget)
     for (auto *text : widget->findChildren<QLabel *>())
         if (text->text().contains("15–600 秒") && text->text().contains("10 分鐘")) return true;
     return false;
+}
+static bool connectedUi(const QString &output)
+{
+    QTemporaryDir temp; UiTransport network; QString error;
+    tca::Settings settings; settings.theme = 2; settings.wizardDone = true;
+    settings.favorites = {{"42", "Minecraft"}};
+    if (!settings.save(temp.filePath("settings.json"), &error)) return false;
+    tca::Dock dock(temp.path(), nullptr, &network); dock.resize(420, 1000); dock.show();
+    auto wait = [](const std::function<bool()> &done, int timeout = 2000) {
+        QElapsedTimer timer; timer.start();
+        while (!done() && timer.elapsed() < timeout) { QApplication::processEvents(QEventLoop::AllEvents, 20); QThread::msleep(1); }
+        return done();
+    };
+    auto settle = [](int duration) { QEventLoop loop; QTimer::singleShot(duration, &loop, &QEventLoop::quit); loop.exec(); };
+#define UI_CHECK(condition) do { if (!(condition)) { std::fprintf(stderr, "Connected UI failure at line %d: %s\n", __LINE__, #condition); return false; } } while (false)
+    auto &client = tca::DockTestAccess::twitch(dock);
+    auto *accountLight = dock.findChild<QLabel *>("accountIndicator"); auto *statusLight = dock.findChild<QLabel *>("statusIndicator");
+    UI_CHECK(tca::DockTestAccess::layoutOrder(dock));
+    UI_CHECK(accountLight && accountLight->property("state") == "error");
+    network.clientId = tca::DockTestAccess::prepareFixture(dock); client.login(network.clientId);
+    UI_CHECK(accountLight->property("state") == "notice");
+    UI_CHECK(wait([&] { return client.connected() && !client.readingCurrent(); }, 8000));
+    UI_CHECK(accountLight->property("state") == "success" && statusLight->property("state") == "success");
+    UI_CHECK(dock.findChild<QLabel *>("accountName")->text().contains("fixture_streamer"));
+    UI_CHECK(dock.findChild<QPushButton *>("connectAccount")->isHidden());
+    UI_CHECK(tca::DockTestAccess::pausedCopy(dock));
+    auto *input = dock.findChild<QLineEdit *>("categorySearchInput"); auto *search = dock.findChild<QPushButton *>("categorySearchButton");
+    UI_CHECK(input && search && search->isEnabled() && !search->property("primary").toBool());
+    input->setText("   "); search->click();
+    UI_CHECK(network.searches == 0 && dock.findChild<QLabel *>("operationStatus")->text().contains("請先輸入"));
+    input->setText("Minecraft"); settle(550);
+    UI_CHECK(network.searches == 0 && search->property("primary").toBool());
+    search->click(); search->click();
+    UI_CHECK(network.searches == 1 && !search->isEnabled());
+    UI_CHECK(wait([&] { return search->isEnabled(); }));
+    QKeyEvent enter(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier); QApplication::sendEvent(input, &enter);
+    UI_CHECK(network.searches == 2); UI_CHECK(wait([&] { return search->isEnabled(); }));
+    auto *refresh = dock.findChild<QPushButton *>("refreshCurrent"); UI_CHECK(refresh && refresh->isEnabled());
+    const auto reads = network.reads; refresh->click(); refresh->click();
+    UI_CHECK(network.reads == reads + 1 && refresh->property("refreshing").toBool() && !refresh->isEnabled());
+    UI_CHECK(statusLight->property("state") == "notice");
+    const bool animations = QApplication::style()->styleHint(QStyle::SH_Widget_Animate);
+    UI_CHECK(tca::DockTestAccess::refreshAnimating(dock) == animations);
+    const auto iconFrame = refresh->icon().cacheKey(); settle(120);
+    UI_CHECK(!animations || refresh->icon().cacheKey() != iconFrame);
+    UI_CHECK(wait([&] { return !client.readingCurrent(); }));
+    UI_CHECK(!tca::DockTestAccess::refreshAnimating(dock) && statusLight->property("state") == "success");
+    QPushButton *settingsButton = nullptr; for (auto *candidate : dock.findChildren<QPushButton *>()) if (candidate->text() == "設定") settingsButton = candidate;
+    UI_CHECK(settingsButton);
+    bool accountEntry = false;
+    QTimer::singleShot(50, &dock, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        auto *summary = dialog ? dialog->findChild<QLabel *>("settingsAccountName") : nullptr;
+        accountEntry = dialog && dialog->findChild<QPushButton *>("changeTwitchAccount") && summary && summary->text().contains("fixture_streamer");
+        if (dialog && !dialog->grab().save(output + "/account-settings.png")) accountEntry = false;
+        if (dialog) dialog->reject();
+    });
+    settingsButton->click(); UI_CHECK(accountEntry);
+    settle(160); UI_CHECK(tca::DockTestAccess::preview(dock, output + "/connected-dark.png"));
+    tca::DockTestAccess::lightTheme(dock); settle(160); UI_CHECK(tca::DockTestAccess::preview(dock, output + "/connected-light.png"));
+    network.failRead = true; refresh->click(); UI_CHECK(wait([&] { return !client.readingCurrent(); }));
+    UI_CHECK(statusLight->property("state") == "error" && !tca::DockTestAccess::refreshAnimating(dock));
+    tca::DockTestAccess::noAnimation(dock); network.failRead = false; refresh->click();
+    UI_CHECK(client.readingCurrent() && !tca::DockTestAccess::refreshAnimating(dock));
+    dock.stop(); UI_CHECK(!client.readingCurrent() && !tca::DockTestAccess::refreshAnimating(dock));
+    UI_CHECK(!network.unexpected);
+#undef UI_CHECK
+    return true;
 }
 
 int main(int argc, char **argv)
@@ -386,7 +517,9 @@ int main(int argc, char **argv)
         tca::DockTestAccess::developerScan(developer); app.processEvents();
         if (auto *repeated = developer.findChild<QMessageBox *>("categorySuggestionPrompt"); repeated && repeated->isVisible()) result = 31;
         developer.grab().save(output + "/developer-preview.png");
-        developer.stop(); app.exit(result);
+        developer.stop(); developer.hide();
+        if (!connectedUi(output)) result = 80;
+        app.exit(result);
     });
     QTimer::singleShot(25000, &app, [&] { app.exit(10); });
     const auto code = app.exec();
