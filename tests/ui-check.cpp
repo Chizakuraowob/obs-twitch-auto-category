@@ -26,6 +26,7 @@
 #include <cstdio>
 #include <QDateTime>
 #include <QTextBrowser>
+#include <QTextBlock>
 #include <QTabWidget>
 #include <QPromise>
 #include <QJsonDocument>
@@ -86,6 +87,10 @@ protected:
 
 namespace tca {
 struct DockTestAccess {
+    static void releaseNotes(Dock &dock) {
+        dock.updater.latest.notes = "## 這個版本更新了什麼\n\n- **改善更新說明預覽**\n- 安裝成功後清除 MSI\n\n[專案網站](https://github.com/Chizakuraowob/obs-twitch-auto-category)";
+        emit dock.updater.changed();
+    }
     static Client &twitch(Dock &dock) { return dock.client; }
     static void login(Dock &dock) { dock.login(); }
     static QString prepareFixture(Dock &dock) {
@@ -538,15 +543,21 @@ int main(int argc, char **argv)
         if (results->palette().color(QPalette::Text).lightness() > 100 || !results->grab().save(output + "/search-results-light.png")) result = 27;
         QTimer::singleShot(100, &app, [&] {
             auto *dialog = qobject_cast<QDialog *>(app.activeModalWidget());
-            auto *combo = dialog ? dialog->findChild<QComboBox *>() : nullptr;
+            auto *combo = dialog ? dialog->findChild<QComboBox *>("appearanceTheme") : nullptr;
             if (!combo) { result = 22; if (dialog) dialog->reject(); return; }
             combo->showPopup(); settle();
             if (combo->view()->palette().color(QPalette::Text).lightness() > 100) result = 23;
             if (!dialog->grab().save(output + "/settings-light.png") ||
                 !combo->view()->window()->grab().save(output + "/theme-popup-light.png")) result = 24;
             combo->hidePopup();
+            tca::DockTestAccess::releaseNotes(light);
+            auto *notes = dialog->findChild<QTextBrowser *>("releaseNotes");
+            if (!notes || notes->toPlainText().contains("##") || notes->document()->firstBlock().blockFormat().headingLevel() != 2 ||
+                !notes->document()->resource(QTextDocument::ImageResource, QUrl::fromLocalFile(lightTemp.filePath("settings.json"))).isNull() || notes->openLinks()) result = 89;
             auto *scroll = dialog->findChild<QScrollArea *>();
             if (scroll) { scroll->verticalScrollBar()->setValue(dialog->findChild<QWidget *>("checkUpdates")->mapTo(scroll->widget(), QPoint{}).y() - 180); settle(); if (!dialog->grab().save(output + "/settings-updates.png")) result = 48; }
+            combo->setCurrentIndex(2); settle();
+            if (!dialog->grab().save(output + "/settings-updates-dark.png") || !notes || notes->palette().color(QPalette::Text).lightness() < 150) result = 90;
             dialog->reject();
         });
         for (auto *button : light.findChildren<QPushButton *>()) if (button->text() == "設定") { button->click(); break; }

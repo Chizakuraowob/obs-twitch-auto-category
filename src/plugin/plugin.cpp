@@ -8,6 +8,7 @@
 #include <QTimer>
 #include <QCoreApplication>
 #include <QSslSocket>
+#include <QMessageBox>
 #include "ui/dock.hpp"
 #include "release-config.hpp"
 
@@ -58,6 +59,15 @@ void obs_module_post_load(void)
     dock = new tca::Dock(path, main);
     if (!obs_frontend_add_dock_by_id("twitch-category-assistant", "Twitch 分類助手", dock)) { delete dock; return; }
     dock->setStreaming(obs_frontend_streaming_active());
+    QObject::connect(dock, &tca::Dock::installUpdateRequested, main, [main] {
+        if (!dock || exiting) return;
+        if (obs_frontend_streaming_active() || obs_frontend_recording_active() || obs_frontend_replay_buffer_active() || obs_frontend_virtualcam_active()) {
+            QMessageBox::information(main, "更新已下載", "請先停止直播、錄影、重播緩衝與虛擬攝影機，再按下載並安裝更新。MSI 已保留於更新資料夾。"); return;
+        }
+        QString error;
+        if (!dock->startUpdateInstaller(&error)) { QMessageBox::warning(main, "無法開始更新", error); return; }
+        QTimer::singleShot(0, main, [main] { main->close(); });
+    });
     obs_frontend_add_event_callback(eventCallback, nullptr);
     blog(LOG_INFO, "[Twitch Category Assistant] native dock initialized");
 }

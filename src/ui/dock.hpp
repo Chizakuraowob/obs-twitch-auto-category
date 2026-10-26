@@ -24,6 +24,9 @@ public:
     void stop();
     bool needsSetup() const { return !settingsReadError && !config.wizardDone; }
     void beginFirstRun();
+    bool startUpdateInstaller(QString *error) { return updater.launchInstaller(error); }
+signals:
+    void installUpdateRequested();
 private:
     friend struct DockTestAccess;
     bool save();

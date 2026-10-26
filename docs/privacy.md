@@ -1,6 +1,6 @@
 # 隱私權政策
 
-文件版本：2026-10-26-v5。適用版本：0.5.3 起。
+文件版本：2026-10-27-v6。適用版本：0.5.8 起。
 
 ## 維護者與適用範圍
 
@@ -21,7 +21,7 @@
 - 偏好、收藏、辨識規則、遊戲庫對應快取、忽略項目、文件同意版本與 UTC 時間：保存在 OBS 提供的外掛設定目錄 `settings.json`。標準 Windows 安裝通常位於 `%APPDATA%/obs-studio/plugin_config/twitch-category-assistant`；可攜版或不同帳號可能不同。保存至你刪除或重設。
 - Twitch Access／Refresh Token：保存在目前 Windows 使用者的認證管理員，不寫入設定 JSON；登入工作階段中也會存在記憶體。用於維持、驗證與刷新授權。
 - 活動紀錄及辨識暫存：主要留在本次工作階段。OBS 自身的日誌另可能保存外掛版本、初始化與 TLS 可用性等診斷資訊，由 OBS 管理；回報日誌前請自行檢查內容。
-- 更新下載：完成的 MSI 保存在設定目錄的 `updates` 子目錄，直到你自行刪除。取消、失敗或雜湊不符的下載不作為可用安裝檔保留。
+- 更新下載：完成的 MSI 保存在設定目錄的 `updates` 子目錄；接續安裝成功後刪除，取消或安裝失敗則保留。安裝助手腳本與本機安裝／錯誤記錄也保存於此，供排錯與自行刪除，不會上傳。取消、失敗或雜湊不符的下載不作為可用安裝檔保留。
 - 0.5.3 起，升級後首次儲存先建立 `settings.json.backup-時間`，保留升級前設定。讀取錯誤會阻止儲存；使用備份還原前，另外保留 `settings.json.before-restore-時間`。備份可能含與原設定相同的私人標題或指紋，匯出的規則 JSON 與備份檔須自行管理。
 
 ## Twitch 與圖片服務
@@ -36,7 +36,7 @@ OAuth、Token 驗證／刷新／撤銷會連線 `id.twitch.tv`，授權網頁由
 
 自動檢查預設關閉，開啟後在啟動時檢查一次；手動檢查也會連線。請求前往 `api.github.com`，更新下載可經 `github.com`、`release-assets.githubusercontent.com` 或 `objects.githubusercontent.com`。GitHub 可取得 IP、User-Agent 及請求資訊；外掛不向 GitHub 傳送 Twitch Token、Client ID、遊戲、程序或視窗資料。
 
-只有你按下下載才取得 MSI；外掛核對 API 提供的 SHA-256。Windows 簽章驗證只用本機快取，不為此額外查詢撤銷服務。GitHub 的資料處理依 [GitHub 隱私聲明](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement)。瀏覽器開啟專案、聯絡或授權連結時，相關網站也會收到一般瀏覽請求。
+只有你按下「下載、驗證並安裝更新」才取得 MSI；外掛核對 API 提供的 SHA-256，確認未直播／錄影等輸出後正常關閉 OBS，本機助手等候 OBS 退出、再次核對雜湊，再啟動安裝精靈。安裝成功才清除此次 MSI，Windows 權限與安全限制仍適用。更新說明以 Markdown 預覽，不載入圖片或外部資源；HTTPS 連結須自行點擊才開啟瀏覽器。Windows 簽章驗證只用本機快取，不為此額外查詢撤銷服務。GitHub 的資料處理依 [GitHub 隱私聲明](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement)。瀏覽器開啟專案、聯絡或授權連結時，相關網站也會收到一般瀏覽請求。
 
 ## 控制、刪除與聯絡
 

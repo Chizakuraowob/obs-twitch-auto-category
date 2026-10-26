@@ -7,7 +7,7 @@
 #include <QJsonArray>
 
 namespace tca {
-inline const QString DocumentVersion = QStringLiteral("2026-10-26-v5");
+inline const QString DocumentVersion = QStringLiteral("2026-10-27-v6");
 struct Rule {
     QString executable, categoryId, categoryName;
     int priority = 0;

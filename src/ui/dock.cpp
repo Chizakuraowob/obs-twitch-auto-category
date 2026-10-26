@@ -817,6 +817,14 @@ void Dock::fetchArt(const Category &category)
         if (artCache.size() >= 100) artCache.clear(); artCache.insert(id, pixmap); show(pixmap);
     });
 }
+class ReleaseNotesDocument : public QTextDocument {
+public:
+    explicit ReleaseNotesDocument(QObject *parent) : QTextDocument(parent) {
+        setResourceProvider([](const QUrl &) { return QVariant(); });
+    }
+protected:
+    QVariant loadResource(int, const QUrl &) override { return {}; }
+};
 static QTextBrowser *documentView(const QString &resource, bool markdown = true)
 {
     auto *view = new QTextBrowser;
@@ -965,7 +973,7 @@ void Dock::settingsDialog()
     auto *chattingDelay = new QSpinBox; chattingDelay->setObjectName("chattingDelay"); chattingDelay->setRange(15, 600); chattingDelay->setSuffix(" 秒"); chattingDelay->setValue(config.chattingDelay); chattingDelay->setEnabled(chatting->isChecked()); detection->addWidget(chattingDelay);
     connect(chatting, &QCheckBox::toggled, chattingDelay, &QWidget::setEnabled);
     detection->addWidget(label("從最後一款已確認遊戲的程序退出後計時。一般視窗不阻止倒數；只詢問，不自動切換。修改後重新計時。"));
-    auto *appearance = card(layout, "外觀"); auto *themeBox = new QComboBox; themeBox->addItems({"跟隨系統", "淺色", "深色"}); themeBox->setCurrentIndex(config.theme); appearance->addWidget(themeBox);
+    auto *appearance = card(layout, "外觀"); auto *themeBox = new QComboBox; themeBox->setObjectName("appearanceTheme"); themeBox->addItems({"跟隨系統", "淺色", "深色"}); themeBox->setCurrentIndex(config.theme); appearance->addWidget(themeBox);
     auto *fontBox = new QFontComboBox; fontBox->setCurrentFont(QFont(config.fontFamily)); fontBox->setAccessibleName("介面字型"); appearance->addWidget(label("字型")); appearance->addWidget(fontBox);
     auto *fontSize = new QSpinBox; fontSize->setObjectName("fontSize"); fontSize->setRange(12, 22); fontSize->setSuffix(" px"); fontSize->setValue(config.fontSize); fontSize->setAccessibleName("字體大小"); appearance->addWidget(label("字體大小")); appearance->addWidget(fontSize);
     auto *animationBox = new QCheckBox("輕量淡入動畫"); animationBox->setChecked(config.animations); appearance->addWidget(animationBox);
@@ -982,18 +990,20 @@ void Dock::settingsDialog()
     auto *updates = card(layout, "版本與更新"); updates->addWidget(label("目前版本：" + QString::fromLatin1(PluginVersion) + "\nGitHub：" + QString::fromLatin1(UpdateRepository)));
     auto *updateStatus = label(updater.status); updateStatus->setObjectName("updateStatus"); updates->addWidget(updateStatus);
     auto *autoCheck = new QCheckBox("啟動後自動檢查 GitHub 更新（預設關閉）"); autoCheck->setChecked(config.checkUpdates); autoCheck->setEnabled(updater.configured()); updates->addWidget(autoCheck);
-    updates->addWidget(label("檢查與下載會連線 GitHub，對方可取得 IP 與請求資訊；不傳送 Twitch Token 或遊戲資料。更新須先關閉 OBS，不支援執行中替換外掛。"));
+    updates->addWidget(label("檢查與下載會連線 GitHub，不傳送 Twitch Token 或遊戲資料。下載並驗證後會關閉 OBS 並開啟安裝精靈，請先儲存工作並停止直播／錄影。安裝成功後自動刪除 MSI；失敗或取消則保留。Windows 權限與安全提示仍需自行確認。"));
     auto *check = button("立即檢查更新"); check->setObjectName("checkUpdates"); updates->addWidget(check);
-    auto *notes = new QTextBrowser; notes->setMaximumHeight(160); notes->setOpenExternalLinks(false); updates->addWidget(notes);
-    auto *download = button("下載並核對 SHA-256"); download->setProperty("secondary", true); updates->addWidget(download);
+    auto *notes = new QTextBrowser; notes->setDocument(new ReleaseNotesDocument(notes)); notes->setObjectName("releaseNotes"); notes->setMaximumHeight(220); notes->setOpenLinks(false); notes->setOpenExternalLinks(false); updates->addWidget(notes);
+    connect(notes, &QTextBrowser::anchorClicked, notes, [](const QUrl &url) { if (url.scheme() == "https" && url.userInfo().isEmpty()) QDesktopServices::openUrl(url); });
+    auto *download = button("下載、驗證並安裝更新"); download->setProperty("secondary", true); updates->addWidget(download);
     auto *cancelDownload = button("取消下載／檢查"); updates->addWidget(cancelDownload);
     auto *skip = button("略過此版本"); updates->addWidget(skip);
     auto *folder = button("開啟已下載更新資料夾"); updates->addWidget(folder);
-    auto refreshUpdate = [=] { updateStatus->setText(updater.status + (updater.latest.version == config.skippedUpdate && !config.skippedUpdate.isEmpty() ? "（已略過自動提醒）" : "")); notes->setPlainText(updater.latest.notes); notes->setVisible(!updater.latest.notes.isEmpty()); check->setEnabled(updater.configured() && !updater.busy()); download->setEnabled(!updater.latest.version.isEmpty() && !updater.busy()); cancelDownload->setEnabled(updater.busy()); skip->setEnabled(!updater.latest.version.isEmpty() && !updater.busy()); folder->setEnabled(!updater.downloaded.isEmpty()); };
+    auto refreshUpdate = [=] { updateStatus->setText(updater.status + (updater.latest.version == config.skippedUpdate && !config.skippedUpdate.isEmpty() ? "（已略過自動提醒）" : "")); notes->document()->setMarkdown(updater.latest.notes, QTextDocument::MarkdownFeatures(QTextDocument::MarkdownDialectGitHub) | QTextDocument::MarkdownNoHTML); notes->setVisible(!updater.latest.notes.isEmpty()); check->setEnabled(updater.configured() && !updater.busy()); download->setEnabled(!updater.latest.version.isEmpty() && !updater.busy()); cancelDownload->setEnabled(updater.busy()); skip->setEnabled(!updater.latest.version.isEmpty() && !updater.busy()); folder->setEnabled(!updater.downloaded.isEmpty()); };
     connect(&updater, &Updater::changed, &dialog, refreshUpdate); refreshUpdate();
     connect(&updater, &Updater::progress, &dialog, [=](qint64 received, qint64 total) { updateStatus->setText(QString("下載中：%1 / %2 KB").arg(received / 1024).arg(total / 1024)); });
     connect(check, &QPushButton::clicked, &updater, &Updater::check);
     connect(download, &QPushButton::clicked, &dialog, [this] { updater.download(QDir(directory).filePath("updates")); });
+    connect(&updater, &Updater::downloadVerified, &dialog, [&, this] { dialog.accept(); emit installUpdateRequested(); });
     connect(cancelDownload, &QPushButton::clicked, &updater, &Updater::cancel);
     connect(skip, &QPushButton::clicked, &dialog, [&, this] { const auto old = config.skippedUpdate; config.skippedUpdate = updater.latest.version; if (!save()) config.skippedUpdate = old; refreshUpdate(); });
     connect(folder, &QPushButton::clicked, &dialog, [this] { if (!updater.downloaded.isEmpty()) QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(updater.downloaded).absolutePath())); });

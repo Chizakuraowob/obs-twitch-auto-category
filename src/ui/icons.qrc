@@ -6,5 +6,6 @@
 <file alias="third-party.md">../../docs/third-party.md</file>
 <file alias="source-distribution.md">../../docs/source-distribution.md</file>
 <file alias="LICENSE">../../LICENSE</file>
+<file alias="install-update.ps1">../update/install-update.ps1</file>
 <file alias="WiX-MS-RL.txt">../../docs/licenses/WiX-MS-RL.txt</file>
 </qresource></RCC>

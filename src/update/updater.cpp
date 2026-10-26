@@ -6,6 +6,10 @@
 #include <QRegularExpression>
 #include <QVersionNumber>
 #include <QDir>
+#include <QCoreApplication>
+#include <QProcess>
+#include <QFileInfo>
+#include <QUuid>
 #include <windows.h>
 #include <wintrust.h>
 #include <softpub.h>
@@ -109,8 +113,33 @@ void Updater::finishDownload(const QString &error)
         WINTRUST_FILE_INFO file{}; file.cbStruct = sizeof(file); file.pcwszFilePath = reinterpret_cast<LPCWSTR>(downloaded.utf16());
         WINTRUST_DATA trust{}; trust.cbStruct = sizeof(trust); trust.dwUIChoice = WTD_UI_NONE; trust.dwUnionChoice = WTD_CHOICE_FILE; trust.pFile = &file; trust.dwStateAction = WTD_STATEACTION_VERIFY; trust.dwProvFlags = WTD_CACHE_ONLY_URL_RETRIEVAL;
         GUID action = WINTRUST_ACTION_GENERIC_VERIFY_V2; const LONG result = WinVerifyTrust(nullptr, &action, &trust); trust.dwStateAction = WTD_STATEACTION_CLOSE; WinVerifyTrust(nullptr, &action, &trust);
-        status = "SHA-256 已核對。" + QString(result == ERROR_SUCCESS ? "Windows 簽章有效。" : "簽章未通過本機驗證。") + "請先結束直播／錄影並關閉 OBS，再從下載資料夾手動安裝；不會自動執行。";
+        status = "SHA-256 已核對。" + QString(result == ERROR_SUCCESS ? "Windows 簽章有效。" : "簽章未通過本機驗證，Windows 仍可能阻擋安裝。") + "正在準備關閉 OBS 並安裝更新…";
     }
     emit changed();
+    if (error.isEmpty()) emit downloadVerified();
+}
+bool Updater::launchInstaller(QString *error)
+{
+    if (busy() || downloaded.isEmpty() || latest.digest.isEmpty()) { *error = "更新檔尚未驗證完成"; return false; }
+    QFile source(":/tca/install-update.ps1");
+    const auto helper = QDir(QFileInfo(downloaded).absolutePath()).filePath("install-update.ps1");
+    QSaveFile script(helper);
+    if (!source.open(QIODevice::ReadOnly) || !script.open(QIODevice::WriteOnly)) { *error = "無法準備更新安裝程序；MSI 已保留"; return false; }
+    const auto bytes = source.readAll();
+    if (script.write(bytes) != bytes.size() || !script.commit()) { *error = "無法儲存更新安裝程序；MSI 已保留"; return false; }
+    const auto powershell = QDir(qEnvironmentVariable("SystemRoot")).filePath("System32/WindowsPowerShell/v1.0/powershell.exe");
+    const auto eventName = "Local\\TCA-Update-" + QUuid::createUuid().toString(QUuid::WithoutBraces);
+    HANDLE ready = CreateEventW(nullptr, TRUE, FALSE, reinterpret_cast<LPCWSTR>(eventName.utf16()));
+    if (!ready) { *error = "無法準備更新程序確認；OBS 將保持開啟"; return false; }
+    QProcess process; process.setProgram(powershell);
+    process.setArguments({"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "RemoteSigned", "-File", helper,
+        "-ObsProcessId", QString::number(QCoreApplication::applicationPid()), "-ObsExecutable", QCoreApplication::applicationFilePath(),
+        "-Installer", QFileInfo(downloaded).absoluteFilePath(), "-Digest", latest.digest, "-ReadyEvent", eventName});
+    process.setWorkingDirectory(QFileInfo(downloaded).absolutePath());
+    process.setCreateProcessArgumentsModifier([](QProcess::CreateProcessArguments *args) { args->flags |= CREATE_NO_WINDOW; });
+    if (!process.startDetached()) { CloseHandle(ready); *error = "無法啟動更新安裝程序；請從下載資料夾手動安裝"; return false; }
+    const auto acknowledged = WaitForSingleObject(ready, 10000); CloseHandle(ready);
+    if (acknowledged != WAIT_OBJECT_0) { *error = "安裝助手未能啟動或被 Windows 政策阻擋；OBS 保持開啟，MSI 已保留"; return false; }
+    error->clear(); return true;
 }
 }

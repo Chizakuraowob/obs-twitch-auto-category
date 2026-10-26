@@ -18,6 +18,7 @@ public:
     void check();
     void download(const QString &directory);
     void cancel();
+    bool launchInstaller(QString *error);
     bool configured() const { return validUpdateRepository(repository); }
     bool busy() const { return !reply.isNull(); }
     Release latest;
@@ -25,6 +26,7 @@ public:
 signals:
     void changed();
     void progress(qint64 received, qint64 total);
+    void downloadVerified();
 private:
     void fetch(const QUrl &url, int redirects);
     void consume();

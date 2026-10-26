@@ -84,6 +84,7 @@ if(BUILD_TESTING)
   target_compile_definitions(tca-tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
   target_link_libraries(tca-tests PRIVATE Qt6::Core Qt6::Network Qt6::Concurrent Advapi32 wintrust)
   add_test(NAME tca-tests COMMAND tca-tests)
+  add_test(NAME tca-update-install-check COMMAND powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File "${CMAKE_CURRENT_SOURCE_DIR}/tests/update-install-check.ps1")
   add_executable(tca-ui-check tests/ui-check.cpp src/ui/dock.cpp src/settings/settings.cpp src/detection/detector.cpp src/update/updater.cpp
     src/twitch/client.cpp src/security/credentials.cpp)
   target_sources(tca-ui-check PRIVATE src/ui/icons.qrc)

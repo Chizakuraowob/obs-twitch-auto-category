@@ -114,9 +114,10 @@ int main(int argc, char **argv)
         CHECK(!updateDownloadUrl(QUrl("https://user@github.com/a")));
         Transport transport; transport.fixtures.enqueue({200, encode()}); Updater updater(repo, "0.5.0", nullptr, &transport); updater.check(); waitFor([&] { return !updater.busy(); }); CHECK(updater.latest.version == "0.6.0");
         CHECK(!transport.requests[0].hasRawHeader("Authorization")); CHECK(!transport.requests[0].hasRawHeader("Client-Id"));
-        QTemporaryDir temp; transport.fixtures.enqueue({200, payload}); updater.download(temp.path()); waitFor([&] { return !updater.busy(); });
+        int verified = 0; QObject::connect(&updater, &Updater::downloadVerified, [&] { ++verified; });
+        QTemporaryDir temp; transport.fixtures.enqueue({200, payload}); updater.download(temp.path()); waitFor([&] { return !updater.busy(); }); CHECK(verified == 1);
         CHECK(!updater.downloaded.isEmpty()); QFile file(updater.downloaded); CHECK(file.open(QIODevice::ReadOnly)); CHECK(file.readAll() == payload); file.close();
-        CHECK(QFile::remove(updater.downloaded)); transport.fixtures.enqueue({200, QByteArray(128, 'y')}); updater.download(temp.path()); waitFor([&] { return !updater.busy(); }); CHECK(updater.downloaded.isEmpty()); CHECK(QDir(temp.path()).entryList(QDir::Files).isEmpty());
+        CHECK(QFile::remove(updater.downloaded)); transport.fixtures.enqueue({200, QByteArray(128, 'y')}); updater.download(temp.path()); waitFor([&] { return !updater.busy(); }); CHECK(updater.downloaded.isEmpty()); CHECK(verified == 1); CHECK(QDir(temp.path()).entryList(QDir::Files).isEmpty());
         asset["browser_download_url"] = "https://attacker.invalid/file.msi"; release["assets"] = QJsonArray{asset}; CHECK(!parseRelease(encode(), repo, "0.5.0", &result, &error));
         release["prerelease"] = true; CHECK(!parseRelease(encode(), repo, "0.5.0", &result, &error));
         CHECK(!parseRelease(QByteArray(2 * 1024 * 1024 + 1, 'x'), repo, "0.5.0", &result, &error)); CHECK(!transport.unexpected);
