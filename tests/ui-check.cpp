@@ -35,7 +35,16 @@
 #include <QVBoxLayout>
 #include <QStyle>
 #include <QThread>
+#include <QDesktopServices>
 #include <cstring>
+
+class AuthorizationBrowserSink : public QObject {
+    Q_OBJECT
+public:
+    int opened = 0;
+public slots:
+    void open(const QUrl &url) { if (url.host() == "www.twitch.tv") ++opened; }
+};
 
 class UiReply : public QNetworkReply {
 public:
@@ -77,6 +86,7 @@ protected:
 namespace tca {
 struct DockTestAccess {
     static Client &twitch(Dock &dock) { return dock.client; }
+    static void login(Dock &dock) { dock.login(); }
     static QString prepareFixture(Dock &dock) {
         dock.config.clientId = "fixture123"; dock.config.termsVersion = dock.config.privacyVersion = DocumentVersion;
         dock.config.termsUtc = dock.config.privacyUtc = "2026-10-27T00:00:00Z";
@@ -85,6 +95,7 @@ struct DockTestAccess {
     static void lightTheme(Dock &dock) { dock.config.theme = 1; dock.theme(); }
     static void noAnimation(Dock &dock) { dock.config.animations = false; dock.theme(); }
     static bool refreshAnimating(Dock &dock) { return dock.refreshTimer.isActive(); }
+    static bool searching(Dock &dock) { return dock.searching; }
     static bool quietPrompt(Dock &dock, bool quiet, bool idle, const QString &path) {
         const bool previous = dock.config.quietMode; dock.config.quietMode = quiet;
         dock.notifySuggestion({idle ? "@idle" : "fixture.exe", idle ? "509658" : "42", idle ? "Just Chatting" : "Minecraft", 0});
@@ -224,26 +235,28 @@ static bool connectedUi(const QString &output)
     UI_CHECK(dock.findChild<QLabel *>("accountName")->text().contains("fixture_streamer"));
     UI_CHECK(dock.findChild<QPushButton *>("connectAccount")->isHidden());
     UI_CHECK(tca::DockTestAccess::pausedCopy(dock));
-    auto *input = dock.findChild<QLineEdit *>("categorySearchInput"); auto *search = dock.findChild<QPushButton *>("categorySearchButton");
-    UI_CHECK(input && search && search->isEnabled() && !search->property("primary").toBool());
-    input->setText("   "); search->click();
+    auto *input = dock.findChild<QLineEdit *>("categorySearchInput");
+    UI_CHECK(input && !dock.findChild<QPushButton *>("categorySearchButton"));
+    auto *manual = dock.findChild<QPushButton *>("reviewUnknownGame");
+    auto *hint = dock.findChild<QLabel *>("manualDetectionHint");
+    UI_CHECK(manual && manual->text() == "手動新增遊戲偵測" && hint && hint->text().contains("未偵測到遊戲"));
+    QKeyEvent enter(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+    input->setText("   "); QApplication::sendEvent(input, &enter);
     UI_CHECK(network.searches == 0 && dock.findChild<QLabel *>("operationStatus")->text().contains("請先輸入"));
     input->setText("Minecraft");
-    UI_CHECK(network.searches == 0 && search->property("primary").toBool());
+    UI_CHECK(network.searches == 0);
     UI_CHECK(wait([&] { return network.searches == 1; }));
-    UI_CHECK(wait([&] { return search->isEnabled(); }));
-    search->click(); search->click();
-    UI_CHECK(network.searches == 2 && !search->isEnabled());
-    UI_CHECK(wait([&] { return search->isEnabled(); }));
-    QKeyEvent enter(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier); QApplication::sendEvent(input, &enter);
-    UI_CHECK(network.searches == 3); UI_CHECK(wait([&] { return search->isEnabled(); }));
-    settle(450); UI_CHECK(network.searches == 3);
-    input->setText("old request"); UI_CHECK(wait([&] { return network.searches == 4; }));
+    UI_CHECK(wait([&] { return !tca::DockTestAccess::searching(dock); }));
+    QApplication::sendEvent(input, &enter); QApplication::sendEvent(input, &enter);
+    UI_CHECK(network.searches == 2);
+    UI_CHECK(wait([&] { return !tca::DockTestAccess::searching(dock); }));
+    settle(450); UI_CHECK(network.searches == 2);
+    input->setText("old request"); UI_CHECK(wait([&] { return network.searches == 3; }));
     input->clear(); settle(300);
-    UI_CHECK(dock.findChild<QListWidget *>("searchResults")->count() == 0 && !search->property("primary").toBool());
-    input->setText("Minecraft"); search->click();
-    UI_CHECK(network.searches == 5); UI_CHECK(wait([&] { return search->isEnabled(); }));
-    settle(450); UI_CHECK(network.searches == 5);
+    UI_CHECK(dock.findChild<QListWidget *>("searchResults")->count() == 0);
+    input->setText("Minecraft"); QApplication::sendEvent(input, &enter);
+    UI_CHECK(network.searches == 4); UI_CHECK(wait([&] { return !tca::DockTestAccess::searching(dock); }));
+    settle(450); UI_CHECK(network.searches == 4);
     auto *refresh = dock.findChild<QPushButton *>("refreshCurrent"); UI_CHECK(refresh && refresh->isEnabled());
     const auto reads = network.reads; refresh->click(); refresh->click();
     UI_CHECK(network.reads == reads + 1 && refresh->property("refreshing").toBool() && !refresh->isEnabled());
@@ -292,6 +305,36 @@ static bool connectedUi(const QString &output)
     tca::DockTestAccess::lightTheme(dock); settle(160); UI_CHECK(tca::DockTestAccess::preview(dock, output + "/connected-light.png"));
     network.failRead = true; refresh->click(); UI_CHECK(wait([&] { return !client.readingCurrent(); }));
     UI_CHECK(statusLight->property("state") == "error" && !tca::DockTestAccess::refreshAnimating(dock));
+    bool logoutShown = false;
+    QTimer::singleShot(50, &dock, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        auto *logout = dialog ? dialog->findChild<QPushButton *>("logoutTwitch") : nullptr;
+        if (logout) {
+            logout->click(); auto *feedback = dialog->findChild<QLabel *>("logoutFeedback");
+            logoutShown = !client.connected() && feedback && feedback->isVisible() && feedback->text().contains("已登出") && logout->text() == "已登出";
+            settle(180); dialog->grab().save(output + "/logout-feedback.png");
+        }
+        if (dialog) dialog->reject();
+    });
+    settingsButton->click(); UI_CHECK(logoutShown);
+    network.failRead = false; AuthorizationBrowserSink browser;
+    QDesktopServices::setUrlHandler("https", &browser, "open");
+    bool successStayed = false; QTimer inspectLogin; inspectLogin.setInterval(30);
+    QObject::connect(&inspectLogin, &QTimer::timeout, &dock, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        auto *panel = dialog ? dialog->findChild<QWidget *>("loginSuccessPanel") : nullptr;
+        if (!panel || !panel->isVisible()) return;
+        inspectLogin.stop();
+        QTimer::singleShot(600, dialog, [&, dialog] {
+            auto *account = dialog->findChild<QLabel *>("loginSuccessAccount"); auto *next = dialog->findChild<QPushButton *>("loginContinue");
+            successStayed = dialog->isVisible() && client.connected() && account && account->text().contains("fixture_streamer") && next && next->isVisible();
+            if (!dialog->grab().save(output + "/login-success.png")) successStayed = false;
+            if (next) next->click(); else dialog->reject();
+        });
+    });
+    inspectLogin.start(); tca::DockTestAccess::login(dock); inspectLogin.stop(); QDesktopServices::unsetUrlHandler("https");
+    UI_CHECK(successStayed && browser.opened == 1);
+    UI_CHECK(wait([&] { return !client.readingCurrent(); }));
     tca::DockTestAccess::noAnimation(dock); network.failRead = false; refresh->click();
     UI_CHECK(client.readingCurrent() && !tca::DockTestAccess::refreshAnimating(dock));
     dock.stop(); UI_CHECK(!client.readingCurrent() && !tca::DockTestAccess::refreshAnimating(dock));
@@ -567,8 +610,10 @@ int main(int argc, char **argv)
         if (!connectedUi(output)) result = 80;
         app.exit(result);
     });
-    QTimer::singleShot(25000, &app, [&] { app.exit(10); });
+    QTimer::singleShot(40000, &app, [&] { app.exit(10); });
     const auto code = app.exec();
     std::printf("UI smoke result: %d; renders: %s\n", code, output.toUtf8().constData());
     return code;
 }
+
+#include "ui-check.moc"

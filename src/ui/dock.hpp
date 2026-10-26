@@ -37,7 +37,6 @@ private:
     void about();
     void document(const QString &kind);
     void updateAccount();
-    void updateSearch();
     void updateRefresh();
     void addActivity(const QString &text);
     void scan();
@@ -78,7 +77,7 @@ private:
     bool lookupPending = false;
     int libraryCount = 0;
     QPushButton *favoriteAdd, *favoriteApply, *favoriteRemove;
-    QPushButton *connectButton, *searchButton, *applyButton, *moreButton, *suggestionApply, *resumeButton;
+    QPushButton *connectButton, *applyButton, *moreButton, *suggestionApply, *resumeButton;
     QPushButton *activityToggle, *mappingButton, *ignoreButton;
     QVector<Category> searchCategories;
     QVector<Candidate> detected;
