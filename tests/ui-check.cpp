@@ -28,9 +28,12 @@
 #include <QTextBrowser>
 #include <QTabWidget>
 #include <QPromise>
+#include <QJsonDocument>
 
 namespace tca {
 struct DockTestAccess {
+    static bool documents(Dock &dock) { return dock.confirmUpdatedDocuments(); }
+    static bool attemptSave(Dock &dock) { return dock.save(); }
     static void developerScan(Dock &dock) {
         // A real foreground window can change while these UI assertions run.
         dock.scanTimer.stop(); dock.watcher.disconnect(&dock); dock.watcher.waitForFinished();
@@ -261,6 +264,57 @@ int main(int argc, char **argv)
         if (!tca::DockTestAccess::games(light)) result = 47;
         if (!tca::DockTestAccess::decisionRemembered(light, true) || !tca::DockTestAccess::decisionRemembered(light, false)) result = 40;
         light.stop(); light.hide();
+        QTemporaryDir upgradeTemp;
+        auto legacy = settings.json(); legacy["wizardDone"] = true; legacy.remove("wizardRevision");
+        legacy["savedByVersion"] = "0.5.2"; legacy["termsVersion"] = "old-policy"; legacy["privacyVersion"] = "old-policy";
+        legacy["termsUtc"] = legacy["privacyUtc"] = "2026-10-24T00:00:00Z";
+        const auto upgradePath = upgradeTemp.filePath("settings.json");
+        const auto original = QJsonDocument(legacy).toJson();
+        { QFile file(upgradePath); if (!file.open(QIODevice::WriteOnly) || file.write(original) != original.size()) result = 59; }
+        tca::Dock upgraded(upgradeTemp.path()); upgraded.show();
+        if (upgraded.needsSetup()) result = 60;
+        QEventLoop updatePrompt;
+        QTimer::singleShot(300, &app, [&] {
+            auto *dialog = qobject_cast<QDialog *>(app.activeModalWidget());
+            if (!dialog || dialog->objectName() != "updatedDocuments" || qobject_cast<QWizard *>(dialog)) result = 61;
+            if (dialog) { dialog->grab().save(output + "/updated-documents.png"); dialog->reject(); }
+            updatePrompt.quit();
+        });
+        upgraded.beginFirstRun(); updatePrompt.exec();
+        { QFile file(upgradePath); if (!file.open(QIODevice::ReadOnly) || file.readAll() != original) result = 62; }
+        QTimer::singleShot(50, &app, [&] {
+            auto *dialog = qobject_cast<QDialog *>(app.activeModalWidget());
+            auto *buttons = dialog ? dialog->findChild<QDialogButtonBox *>() : nullptr;
+            if (!buttons) { result = 63; if (dialog) dialog->reject(); return; }
+            auto *ok = buttons->button(QDialogButtonBox::Ok);
+            if (ok->isEnabled()) result = 64;
+            const auto boxes = dialog->findChildren<QCheckBox *>();
+            if (boxes.size() != 2) { result = 65; dialog->reject(); return; }
+            boxes[0]->setChecked(true); if (ok->isEnabled()) result = 66;
+            boxes[1]->setChecked(true); ok->click();
+        });
+        // Directly exercise consent persistence without restoring real Credential Manager tokens.
+        if (!tca::DockTestAccess::documents(upgraded)) result = 67;
+        const auto savedUpgrade = tca::Settings::load(upgradePath, &error);
+        if (!savedUpgrade.consented() || !savedUpgrade.wizardDone || upgraded.needsSetup()) result = 68;
+        auto expected = tca::Settings::fromJson(legacy).json(); auto actual = savedUpgrade.json();
+        for (const auto &key : {"termsVersion", "privacyVersion", "termsUtc", "privacyUtc"}) { expected.remove(key); actual.remove(key); }
+        if (actual != expected || QDir(upgradeTemp.path()).entryList({"settings.json.backup-*"}).size() != 1) result = 69;
+        upgraded.stop(); upgraded.hide();
+        QTemporaryDir corruptTemp; const auto corruptPath = corruptTemp.filePath("settings.json");
+        { QFile file(corruptPath); if (!file.open(QIODevice::WriteOnly) || file.write("{broken") != 7) result = 73; }
+        tca::Dock corrupt(corruptTemp.path()); corrupt.show();
+        if (corrupt.needsSetup() || tca::DockTestAccess::attemptSave(corrupt)) result = 70;
+        QEventLoop recoveryPrompt;
+        QTimer::singleShot(300, &app, [&] {
+            auto *dialog = qobject_cast<QDialog *>(app.activeModalWidget());
+            if (!dialog || dialog->objectName() != "settingsRecovery") result = 71;
+            if (dialog) { dialog->grab().save(output + "/settings-recovery.png"); dialog->reject(); }
+            recoveryPrompt.quit();
+        });
+        corrupt.beginFirstRun(); recoveryPrompt.exec();
+        { QFile file(corruptPath); if (!file.open(QIODevice::ReadOnly) || file.readAll() != "{broken") result = 72; }
+        corrupt.stop(); corrupt.hide();
         QTemporaryDir firstTemp;
         tca::Dock first(firstTemp.path()); first.resize(380, 700); first.show();
         QEventLoop firstRun;

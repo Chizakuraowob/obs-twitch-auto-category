@@ -20,6 +20,7 @@ try {
     $resolved = (Resolve-Path -LiteralPath $Path).Path
     $database = $installer.OpenDatabase($resolved, 0)
     $properties = @{}; foreach ($row in (Read-Table 'Property')) { $properties[$row[0]] = $row[1] }
+    if ($properties.UpgradeCode -ne '{BF633767-A341-4DDC-9007-BEF9D7DA2F4B}') { throw 'Upgrade identity changed; existing installations may not be upgraded correctly.' }
     if ($properties.MSIRESTARTMANAGERCONTROL -ne 'Disable' -or $properties.REBOOT -ne 'ReallySuppress') { throw 'Unexpected automatic process/reboot policy.' }
     $actions = @{}; foreach ($row in (Read-Table 'CustomAction')) { $actions[$row[0]] = $row }
     foreach ($name in @('CheckObsBeforeStart','CheckObsBeforeFiles')) { if ($actions[$name][3] -ne 'TcaCheckObs' -or $actions[$name][2] -ne 'ObsCheckBinary') { throw 'Missing native OBS process guard.' } }
@@ -28,6 +29,7 @@ try {
     $uiSequence = @{}; foreach ($row in (Read-Table 'InstallUISequence')) { $uiSequence[$row[0]] = [int]$row[2] }
     if ($uiSequence.CheckObsBeforeStart -ge $uiSequence.ExecuteAction) { throw 'UI must check OBS before starting installation.' }
     $files = @(Read-Table 'File')
+    if (@($files | Where-Object { $_[2] -match 'settings\.json|\.backup-|\.before-restore-' }).Count) { throw 'User settings must never be owned by the MSI payload.' }
     if ($files.Count -ne 15 -or @($files | Where-Object { $_[2] -match 'Qt6|\.pdb$' }).Count) { throw 'Unexpected MSI payload; do not bundle OBS Qt runtime DLLs or PDBs.' }
     foreach ($doc in @('terms.md','privacy.md','contributors.md','third-party.md','source-distribution.md','WiX-MS-RL.txt','README.md')) {
         if (@($files | Where-Object { ($_[2] -split '\|')[-1] -eq $doc }).Count -ne 1) { throw "Missing public document: $doc" }

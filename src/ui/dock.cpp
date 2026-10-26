@@ -127,6 +127,10 @@ Dock::Dock(QString settingsDirectory, QWidget *parent)
     auto *outer = new QVBoxLayout(this); outer->setContentsMargins(0, 0, 0, 0); outer->setSpacing(0);
     auto *scroll = new QScrollArea; scroll->setWidgetResizable(true); outer->addWidget(scroll);
     auto *body = new QWidget; body->setObjectName("tcaRoot"); scroll->setWidget(body);
+    contentBody = body;
+    recoverButton = button("設定讀取失敗：檢查或還原備份"); recoverButton->setObjectName("recoverSettings"); outer->insertWidget(0, recoverButton);
+    recoverButton->setVisible(settingsReadError); contentBody->setEnabled(!settingsReadError);
+    connect(recoverButton, &QPushButton::clicked, this, &Dock::recoverSettings);
     auto *layout = new QVBoxLayout(body); layout->setSpacing(10); layout->setContentsMargins(10, 10, 10, 10);
     auto *head = new QHBoxLayout;
     auto *title = label("直播分類管理"); title->setProperty("role", "heading"); head->addWidget(title, 1);
@@ -258,10 +262,19 @@ Dock::Dock(QString settingsDirectory, QWidget *parent)
     if (!error.isEmpty()) addActivity(error);
     connect(&updater, &Updater::changed, this, [this] { if (!stopped && !updater.busy() && !updater.latest.version.isEmpty() && updater.latest.version != config.skippedUpdate) setStatus("有新版本 " + updater.latest.version + "，請至設定 → 版本與更新。"); });
     QTimer::singleShot(10000, this, [this] { if (!stopped && config.checkUpdates && config.consented()) updater.check(); });
-    if (config.consented()) client.restore(effectiveClientId());
+    if (!settingsReadError && config.consented()) client.restore(effectiveClientId());
 }
 QString Dock::effectiveClientId() const { return *PublisherClientId ? QString::fromLatin1(PublisherClientId) : config.clientId; }
-void Dock::beginFirstRun() { if (!stopped && needsSetup()) QTimer::singleShot(150, this, &Dock::wizard); }
+void Dock::beginFirstRun()
+{
+    if (stopped) return;
+    QTimer::singleShot(150, this, [this] {
+        if (stopped) return;
+        if (settingsReadError) recoverSettings();
+        else if (needsSetup()) wizard();
+        else if (!config.consented() && confirmUpdatedDocuments()) client.restore(effectiveClientId());
+    });
+}
 void Dock::setStatus(const QString &message) { if (statusLabel->text() != message) { statusLabel->setText(message); animate(statusLabel); } }
 void Dock::animate(QWidget *widget)
 {
@@ -285,12 +298,15 @@ void Dock::setStreaming(bool active) { streaming = active; stableKey.clear(); sc
 void Dock::theme() { setStyleSheet(themeSheet(config)); }
 bool Dock::save()
 {
-    if (settingsReadError && QFile::exists(settingsPath)) {
-        const auto backup = settingsPath + ".backup-" + QDateTime::currentDateTimeUtc().toString("yyyyMMddHHmmsszzz");
-        if (!QFile::copy(settingsPath, backup)) { addActivity("無法備份原設定，已取消儲存"); return false; }
-        settingsReadError = false;
+    if (settingsReadError) { setStatus("設定讀取失敗，已停止儲存以保護舊資料。請開啟設定並還原備份。"); return false; }
+    QString error;
+    if (!config.save(settingsPath, &error)) {
+        addActivity(error); setStatus(error);
+        QString readError; Settings::load(settingsPath, &readError);
+        if (!readError.isEmpty()) { settingsReadError = true; contentBody->setEnabled(false); recoverButton->show(); }
+        return false;
     }
-    QString error; if (!config.save(settingsPath, &error)) { addActivity(error); return false; } return true;
+    return true;
 }
 void Dock::updateAccount()
 {
@@ -548,7 +564,7 @@ void Dock::recognitionDialog()
 }
 void Dock::scan()
 {
-    if (stopped || (!config.consented() && !config.developerMode)) return;
+    if (stopped || settingsReadError || (!config.consented() && !config.developerMode)) return;
     if (!config.suggestionsEnabled(streaming)) {
         suggestionSession.pause();
          pendingWindow = {}; observedWindows.clear(); reviewUnknownButton->setEnabled(true);  unknownLabel->setText("辨識學習隨自動偵測暫停");
@@ -565,7 +581,7 @@ void Dock::scan()
 }
 void Dock::processScan()
 {
-    if (stopped || (!config.consented() && !config.developerMode) || !watcher.isFinished() || !watcher.future().isValid()) return;
+    if (stopped || settingsReadError || (!config.consented() && !config.developerMode) || !watcher.isFinished() || !watcher.future().isValid()) return;
     if (!config.suggestionsEnabled(streaming)) { scan(); return; }
     auto processes = watcher.result(); libraryCount = config.detectLibraries ? processes.libraryCount : 0; localGames = config.detectLibraries ? processes.localGames : QVector<RunningGame>{};
     localGames.erase(std::remove_if(localGames.begin(), localGames.end(), [&](const RunningGame &g) { return config.ignoredLibraries.contains(g.key); }), localGames.end());
@@ -719,7 +735,8 @@ void Dock::showLoginSuccess()
 }
 void Dock::login()
 {
-    if (!config.consented()) { wizard(); return; }
+    if (settingsReadError) { recoverSettings(); return; }
+    if (!config.consented() && !confirmUpdatedDocuments()) return;
     if (effectiveClientId().isEmpty()) { setStatus("此測試版本尚未配置發行者登入服務，請使用已配置的發行版"); return; }
     QDialog dialog(this); dialog.setStyleSheet(themeSheet(config)); dialog.setWindowTitle("連接 Twitch 帳號"); dialog.resize(460, 280);
     auto *layout = new QVBoxLayout(&dialog); auto *instructions = label("正在連接 Twitch…"); layout->addWidget(instructions);
@@ -744,6 +761,7 @@ void Dock::login()
 }
 void Dock::settingsDialog()
 {
+    if (settingsReadError) { recoverSettings(); return; }
     bool openWizard = false;
     QDialog dialog(this); dialog.setWindowTitle("設定"); dialog.setStyleSheet(themeSheet(config)); dialog.resize(500, 600);
     auto *outer = new QVBoxLayout(&dialog); auto *scroll = new QScrollArea; scroll->setWidgetResizable(true); outer->addWidget(scroll);
@@ -832,6 +850,7 @@ void Dock::settingsDialog()
     connect(buttons, &QDialogButtonBox::accepted, &dialog, [&] {
         chattingDelay->interpretText();
         fontSize->interpretText();
+        const auto previous = config;
         const auto newId = id ? id->text().trimmed() : config.clientId;
         if (!QRegularExpression("^[a-zA-Z0-9]{0,128}$").match(newId).hasMatch()) { QMessageBox::warning(&dialog, "Client ID", "Client ID 只可包含英數字"); return; }
         if (newId != config.clientId) client.logout();
@@ -841,13 +860,80 @@ void Dock::settingsDialog()
         config.developerMode = developerMode->isChecked();
         config.checkUpdates = autoCheck->isChecked(); config.chattingSuggestion = chatting->isChecked(); config.chattingDelay = chattingDelay->value(); config.learnUnknown = learn->isChecked(); config.autoDetect = autoDetect->isChecked(); config.detectLibraries = libraries->isChecked(); config.allowCategoryLookup = lookup->isChecked(); lookupAttempted.clear();
         stableKey.clear(); notificationKey.clear(); if (suggestionPrompt) suggestionPrompt->close();
-        suggestionSession.pause(); autoAttemptKey.clear(); lastAuto = 0; save(); theme(); updateAccount(); scan(); dialog.accept();
+        if (!save()) { config = previous; QMessageBox::warning(&dialog, "未儲存", "無法儲存設定，原有檔案未被取代。請檢查設定目錄或還原備份。"); return; }
+        suggestionSession.pause(); autoAttemptKey.clear(); lastAuto = 0; theme(); updateAccount(); scan(); dialog.accept();
     });
     dialog.exec();
     if (openWizard) wizard();
 }
+bool Dock::confirmUpdatedDocuments()
+{
+    if (config.consented()) return true;
+    if (wizardOpen || stopped || settingsReadError) return false;
+    QScopedValueRollback<bool> guard(wizardOpen, true);
+    QDialog dialog(this); dialog.setObjectName("updatedDocuments"); dialog.setWindowTitle("確認更新的條款與隱私政策"); dialog.setStyleSheet(themeSheet(config)); dialog.resize(540, 340);
+    auto *layout = new QVBoxLayout(&dialog);
+    layout->addWidget(label("你的收藏、遊戲規則與偏好已保留，不需要重新設定。\n請閱讀並確認新版文件；選擇稍後不會刪除資料，Twitch 連線功能將等待確認。"));
+    layout->addWidget(label("文件版本：" + DocumentVersion));
+    auto *terms = button("閱讀使用者條款"); layout->addWidget(terms); connect(terms, &QPushButton::clicked, this, [this] { document("服務條款"); });
+    auto *privacy = button("閱讀隱私權政策"); layout->addWidget(privacy); connect(privacy, &QPushButton::clicked, this, [this] { document("隱私權政策"); });
+    auto *agreeTerms = new QCheckBox("我已閱讀並同意使用者條款"); layout->addWidget(agreeTerms);
+    auto *agreePrivacy = new QCheckBox("我已閱讀並同意隱私權政策"); layout->addWidget(agreePrivacy);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel); layout->addWidget(buttons);
+    buttons->button(QDialogButtonBox::Ok)->setText("同意並繼續"); buttons->button(QDialogButtonBox::Ok)->setEnabled(false);
+    buttons->button(QDialogButtonBox::Cancel)->setText("稍後");
+    auto ready = [=] { buttons->button(QDialogButtonBox::Ok)->setEnabled(agreeTerms->isChecked() && agreePrivacy->isChecked()); };
+    connect(agreeTerms, &QCheckBox::toggled, &dialog, ready); connect(agreePrivacy, &QCheckBox::toggled, &dialog, ready);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, [&] {
+        if (!agreeTerms->isChecked() || !agreePrivacy->isChecked()) return;
+        const auto previous = config;
+        config.termsVersion = config.privacyVersion = DocumentVersion;
+        config.termsUtc = config.privacyUtc = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
+        if (!save()) { config = previous; QMessageBox::warning(&dialog, "未儲存", "無法保存同意紀錄；原有設定未被取代，請檢查設定目錄。" ); return; }
+        dialog.accept();
+    });
+    const bool accepted = dialog.exec() == QDialog::Accepted;
+    updateAccount();
+    if (!accepted) setStatus("已保留設定；請確認更新文件後再連接 Twitch。");
+    return accepted;
+}
+void Dock::recoverSettings()
+{
+    if (wizardOpen || stopped) return;
+    QScopedValueRollback<bool> guard(wizardOpen, true);
+    QDialog dialog(this); dialog.setObjectName("settingsRecovery"); dialog.setWindowTitle("保護既有設定"); dialog.setStyleSheet(themeSheet(config)); dialog.resize(550, 310);
+    auto *layout = new QVBoxLayout(&dialog);
+    layout->addWidget(label("設定無法完整讀取，已停用操作與儲存，避免預設值覆寫舊資料。\n請修正原檔後重新讀取，或選擇有效備份還原。還原前會另外保留目前檔案。"));
+    auto *status = label(settingsPath); layout->addWidget(status);
+    auto reload = [&] {
+        QString error;
+        if (!QFile::exists(settingsPath)) { status->setText("原設定檔不存在，請先還原備份。"); return; }
+        const auto loaded = Settings::load(settingsPath, &error);
+        if (!error.isEmpty()) { status->setText(error); return; }
+        config = loaded; settingsReadError = false; recoverButton->hide(); contentBody->setEnabled(true);
+        theme(); refreshFavorites(); updateAccount(); dialog.accept();
+    };
+    auto *retry = button("重新讀取原設定"); retry->setObjectName("retrySettings"); layout->addWidget(retry); connect(retry, &QPushButton::clicked, &dialog, reload);
+    auto *restore = button("選擇設定備份並還原…"); layout->addWidget(restore);
+    connect(restore, &QPushButton::clicked, &dialog, [&] {
+        const auto backup = QFileDialog::getOpenFileName(&dialog, "選擇設定備份", directory, "設定與備份 (settings.json* *.json);;所有檔案 (*)");
+        if (backup.isEmpty()) return;
+        if (QMessageBox::question(&dialog, "確認還原", "還原會採用所選備份中的收藏、規則與偏好。目前檔案會另外保留。要繼續嗎？") != QMessageBox::Yes) return;
+        QString error;
+        if (!Settings::restoreBackup(backup, settingsPath, &error)) { status->setText(error); return; }
+        reload();
+    });
+    auto *folder = button("開啟設定資料夾"); layout->addWidget(folder); connect(folder, &QPushButton::clicked, &dialog, [this] { QDesktopServices::openUrl(QUrl::fromLocalFile(directory)); });
+    auto *close = new QDialogButtonBox(QDialogButtonBox::Close); close->button(QDialogButtonBox::Close)->setText("關閉"); layout->addWidget(close); connect(close, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    if (dialog.exec() == QDialog::Accepted) {
+        if (config.consented()) client.restore(effectiveClientId());
+        else QTimer::singleShot(0, this, &Dock::beginFirstRun);
+    }
+}
 void Dock::wizard()
 {
+    if (settingsReadError) { recoverSettings(); return; }
     if (wizardOpen || stopped) return;
     QScopedValueRollback<bool> guard(wizardOpen, true);
     QWizard wizard(this); wizard.setWizardStyle(QWizard::ModernStyle); wizard.setWindowTitle("Twitch 分類助手 · 首次設定"); wizard.setStyleSheet(themeSheet(config)); wizard.resize(540, 470);
@@ -855,7 +941,7 @@ void Dock::wizard()
     auto page = [&](const QString &title, const QString &text) {
         auto *p = new QWizardPage; p->setTitle(title); auto *layout = new QVBoxLayout(p); layout->addWidget(label(text)); wizard.addPage(p); return p;
     };
-    page("歡迎", "在 OBS 原生 Dock 管理 Twitch 分類。此版本為測試版，正式條款與隱私政策待發布。");
+    page("歡迎", "在 OBS 原生 Dock 管理 Twitch 分類。請先閱讀使用者條款與隱私權政策，再連接 Twitch。");
     page("功能簡介", "搜尋並手動更新分類、讀回確認結果、依已記住的遊戲提出建議。\n預設每次詢問；手動操作不需要先開始直播。");
     auto *consent = new ConsentPage; consent->setTitle("閱讀文件並同意");
     auto *consentLayout = new QVBoxLayout(consent); consentLayout->addWidget(label("請閱讀本版本的使用者條款與隱私權政策；文件版本與聯絡方式列於內文。")); wizard.addPage(consent);
@@ -875,8 +961,11 @@ void Dock::wizard()
     connect(&client, &Client::accountChanged, &wizard, [&] { authStatus->setText(client.connected() ? "✓ 已連線：" + client.userName() : "尚未連線 · 完成登入後才能繼續"); });
     connect(signIn, &QPushButton::clicked, &wizard, [&] {
         if (!agreeTerms->isChecked() || !agreePrivacy->isChecked()) return;
+        const auto previous = config;
         config.termsVersion = config.privacyVersion = DocumentVersion;
-        config.termsUtc = config.privacyUtc = QDateTime::currentDateTimeUtc().toString(Qt::ISODate); save(); login();
+        config.termsUtc = config.privacyUtc = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
+        if (!save()) { config = previous; authStatus->setText("無法保存同意紀錄，請檢查設定目錄。"); return; }
+        login();
     });
     auto *policy = page("分類更新策略", "預設每次詢問。自動模式只套用明確且穩定的映射，手動修改會暫停自動覆寫。");
     auto *autoUpdate = new QCheckBox("符合規則時自動更新"); autoUpdate->setChecked(config.automatic); policy->layout()->addWidget(autoUpdate);
@@ -892,9 +981,12 @@ void Dock::wizard()
     if (wizard.exec() == QDialog::Accepted) {
         chattingDelay->interpretText();
         if (!agreeTerms->isChecked() || !agreePrivacy->isChecked() || !client.connected()) { setStatus("請先同意文件並完成 Twitch 登入"); return; }
+        const auto previous = config;
         config.termsVersion = config.privacyVersion = DocumentVersion;
         config.termsUtc = config.privacyUtc = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
-        config.chattingSuggestion = chatting->isChecked(); config.chattingDelay = chattingDelay->value(); suggestionSession.pause(); config.automatic = autoUpdate->isChecked(); config.notifications = notify->isChecked(); config.liveOnly = live->isChecked(); config.wizardDone = true; save(); updateAccount();
+        config.chattingSuggestion = chatting->isChecked(); config.chattingDelay = chattingDelay->value(); suggestionSession.pause(); config.automatic = autoUpdate->isChecked(); config.notifications = notify->isChecked(); config.liveOnly = live->isChecked(); config.wizardDone = true;
+        if (!save()) { config = previous; setStatus("無法儲存設定，尚未標記設定完成。"); }
+        updateAccount();
     }
 }
 }

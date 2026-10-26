@@ -20,11 +20,11 @@ static void eventCallback(enum obs_frontend_event event, void *)
 {
     if (!dock) return;
     if (event == OBS_FRONTEND_EVENT_EXIT) { exiting = true; dock->stop(); return; }
-    if (event == OBS_FRONTEND_EVENT_FINISHED_LOADING && dock->needsSetup()) {
+    if (event == OBS_FRONTEND_EVENT_FINISHED_LOADING) {
         QTimer::singleShot(0, dock, [] {
             if (!dock || exiting) return;
             auto *main = static_cast<QMainWindow *>(obs_frontend_get_main_window());
-            if (auto *container = main->findChild<QDockWidget *>("twitch-category-assistant")) {
+            if (auto *container = main->findChild<QDockWidget *>("twitch-category-assistant"); container && dock->needsSetup()) {
                 container->setFloating(false);
                 main->addDockWidget(Qt::RightDockWidgetArea, container);
                 container->show(); container->raise();

@@ -7,7 +7,7 @@
 #include <QJsonArray>
 
 namespace tca {
-inline const QString DocumentVersion = QStringLiteral("2026-10-26-v4");
+inline const QString DocumentVersion = QStringLiteral("2026-10-26-v5");
 struct Rule {
     QString executable, categoryId, categoryName;
     int priority = 0;
@@ -48,6 +48,7 @@ struct Settings {
     QJsonObject json() const;
     static Settings fromJson(const QJsonObject &object);
     static Settings load(const QString &path, QString *error);
+    static bool restoreBackup(const QString &backup, const QString &path, QString *error);
     bool save(const QString &path, QString *error) const;
 };
 bool validCategoryId(const QString &id);

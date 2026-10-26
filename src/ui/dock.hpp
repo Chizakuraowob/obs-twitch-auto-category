@@ -22,7 +22,7 @@ public:
     ~Dock() override;
     void setStreaming(bool active);
     void stop();
-    bool needsSetup() const { return !config.wizardDone || !config.consented(); }
+    bool needsSetup() const { return !settingsReadError && !config.wizardDone; }
     void beginFirstRun();
 private:
     friend struct DockTestAccess;
@@ -30,6 +30,8 @@ private:
     void theme();
     void settingsDialog();
     void wizard();
+    bool confirmUpdatedDocuments();
+    void recoverSettings();
     void login();
     void showLoginSuccess();
     void about();
@@ -85,6 +87,8 @@ private:
     WindowEvidence pendingWindow;
     QVector<WindowEvidence> observedWindows;
     QLabel *unknownLabel;
+    QWidget *contentBody;
+    QPushButton *recoverButton;
     QPushButton *reviewUnknownButton;
 
 

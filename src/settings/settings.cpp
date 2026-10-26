@@ -1,4 +1,5 @@
 #include "settings.hpp"
+#include "release-config.hpp"
 #include <QDateTime>
 #include <QFile>
 #include <QJsonArray>
@@ -86,7 +87,7 @@ QJsonObject Settings::json() const
     QJsonArray savedFavorites;
     for (const auto &f : favorites) savedFavorites.append(QJsonObject{{"id", f.id}, {"name", f.name}});
     QJsonObject cache; for (auto it = categoryCache.begin(); it != categoryCache.end(); ++it) cache[it.key()] = QJsonObject{{"id", it->id}, {"name", it->name}};
-    return {{"schema", 1}, {"clientId", clientId}, {"theme", theme}, {"fontFamily", fontFamily}, {"fontSize", fontSize}, {"animations", animations}, {"automatic", automatic},
+    return {{"schema", 1}, {"savedByVersion", PluginVersion}, {"clientId", clientId}, {"theme", theme}, {"fontFamily", fontFamily}, {"fontSize", fontSize}, {"animations", animations}, {"automatic", automatic},
         {"notifications", notifications}, {"liveOnly", liveOnly}, {"paused", paused}, {"multiGame", multiGame},
         {"developerMode", developerMode}, {"favorites", savedFavorites},
         {"autoDetect", autoDetect}, {"detectLibraries", detectLibraries}, {"allowCategoryLookup", allowCategoryLookup}, {"categoryCache", cache},
@@ -128,7 +129,7 @@ Settings Settings::fromJson(const QJsonObject &o)
             favoriteIds.insert(favorite.id); s.favorites.append(favorite);
         }
     }
-    s.wizardDone = o["wizardDone"].toBool() && o["wizardRevision"].toInt() == 2;
+    s.wizardDone = o["wizardDone"].toBool();
     s.termsVersion = o["termsVersion"].toString(); s.privacyVersion = o["privacyVersion"].toString();
     s.termsUtc = o["termsUtc"].toString(); s.privacyUtc = o["privacyUtc"].toString();
     for (const auto &entry : o["rules"].toArray()) {
@@ -139,29 +140,76 @@ Settings Settings::fromJson(const QJsonObject &o)
     }
     return s;
 }
-Settings Settings::load(const QString &path, QString *error)
+static Settings decodeSettings(const QByteArray &bytes, QString *error)
 {
-    QFile file(path);
-    if (!file.exists()) return {};
-    if (!file.open(QIODevice::ReadOnly) || file.size() > 1024 * 1024) { *error = "無法讀取設定檔"; return {}; }
+    error->clear();
     QJsonParseError parse;
-    const auto doc = QJsonDocument::fromJson(file.readAll(), &parse);
+    const auto doc = QJsonDocument::fromJson(bytes, &parse);
     if (parse.error != QJsonParseError::NoError || !doc.isObject() || doc.object()["schema"].toInt() != 1) {
-        *error = "設定檔損壞或版本不支援；原檔保留，儲存前請先備份"; return {};
+        *error = "設定檔損壞或版本不支援；已停止儲存，請從備份還原"; return {};
+    }
+    const auto object = doc.object();
+    const auto settings = Settings::fromJson(object);
+    for (const auto &key : {"favorites", "rules", "recognitionRules", "ignoredLibraries"}) {
+        if (object.contains(key) && !object[key].isArray()) { *error = "設定集合格式錯誤，已停止儲存以保留原檔"; return settings; }
+    }
+    if ((object.contains("categoryCache") && !object["categoryCache"].isObject()) ||
+        settings.favorites.size() != object["favorites"].toArray().size() ||
+        settings.rules.size() != object["rules"].toArray().size() ||
+        settings.categoryCache.size() != object["categoryCache"].toObject().size() ||
+        settings.ignoredLibraries.size() != object["ignoredLibraries"].toArray().size()) {
+        *error = "設定包含無法完整讀取的收藏或規則，已停止儲存以保留原檔"; return settings;
     }
     QVector<RecognitionRule> learned;
     if (doc.object().contains("recognitionRules") && (!doc.object()["recognitionRules"].isArray() || !parseRecognition(doc.object()["recognitionRules"].toArray(), &learned))) {
-        *error = "辨識規則損壞；原設定保留，儲存前會先備份"; return {};
+        *error = "辨識規則損壞；已停止儲存，請從備份還原"; return settings;
     }
-    return fromJson(doc.object());
+    return settings;
+}
+Settings Settings::load(const QString &path, QString *error)
+{
+    error->clear();
+    QFile file(path);
+    if (!file.exists()) return {};
+    if (!file.open(QIODevice::ReadOnly) || file.size() > 1024 * 1024) { *error = "無法讀取設定檔"; return {}; }
+    return decodeSettings(file.readAll(), error);
 }
 bool Settings::save(const QString &path, QString *error) const
 {
+    error->clear();
+    if (QFile::exists(path)) {
+        Settings::load(path, error);
+        if (!error->isEmpty()) return false;
+        QFile previous(path);
+        if (!previous.open(QIODevice::ReadOnly)) { *error = "無法讀取舊設定，已取消儲存"; return false; }
+        const auto previousData = previous.readAll(); previous.close();
+        if (QJsonDocument::fromJson(previousData).object()["savedByVersion"].toString() != PluginVersion) {
+            const auto backup = path + ".backup-" + QDateTime::currentDateTimeUtc().toString("yyyyMMddHHmmsszzz");
+            if (!QFile::copy(path, backup)) { *error = "無法備份升級前設定，已取消儲存"; return false; }
+        }
+    }
     QSaveFile file(path);
     const auto data = QJsonDocument(json()).toJson();
     if (data.size() > 1024 * 1024) { *error = "設定超過 1 MB，請減少規則或快取；原檔未變更"; return false; }
     if (!file.open(QIODevice::WriteOnly) || file.write(data) != data.size() || !file.commit()) {
         *error = "設定儲存失敗"; return false;
+    }
+    return true;
+}
+bool Settings::restoreBackup(const QString &backup, const QString &path, QString *error)
+{
+    error->clear();
+    QFile source(backup);
+    if (!source.open(QIODevice::ReadOnly) || source.size() > 1024 * 1024) { *error = "無法讀取備份"; return false; }
+    const auto bytes = source.readAll(); source.close();
+    decodeSettings(bytes, error);
+    if (!error->isEmpty()) return false;
+    if (QFile::exists(path) && !QFile::copy(path, path + ".before-restore-" + QDateTime::currentDateTimeUtc().toString("yyyyMMddHHmmsszzz"))) {
+        *error = "無法保留目前設定；已取消還原"; return false;
+    }
+    QSaveFile restored(path);
+    if (!restored.open(QIODevice::WriteOnly) || restored.write(bytes) != bytes.size() || !restored.commit()) {
+        *error = "還原失敗；目前設定未被替換"; return false;
     }
     return true;
 }

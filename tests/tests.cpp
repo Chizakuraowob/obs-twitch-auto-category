@@ -221,7 +221,7 @@ int main(int argc, char **argv)
         auto loaded = Settings::fromJson(s.json());
         CHECK(loaded.fontFamily == s.fontFamily); CHECK(loaded.fontSize == 20); CHECK(!loaded.animations); CHECK(loaded.wizardDone);
         auto old = s.json(); old.remove("wizardRevision"); old["fontSize"] = 999;
-        loaded = Settings::fromJson(old); CHECK(!loaded.wizardDone); CHECK(loaded.fontSize == 22);
+        loaded = Settings::fromJson(old); CHECK(loaded.wizardDone); CHECK(loaded.fontSize == 22);
         old["fontSize"] = -1; CHECK(Settings::fromJson(old).fontSize == 12);
     });
     run("local Steam and Epic manifests, path boundaries and library cache", [] {
@@ -256,9 +256,42 @@ int main(int argc, char **argv)
         net.fixtures.enqueue({200, R"({"data":[{"id":"42","name":"Test Game"},{"id":"43","name":"Test Game"}]})"});
         client.resolveCategory("steam:42", "Test Game"); waitFor([&] { return completed == 3; }); CHECK(found.id.isEmpty()); CHECK(!net.unexpected);
     });
+    run("upgrade keeps collections and preferences and backs up original bytes once", [] {
+        QTemporaryDir temp; const auto path = temp.filePath("settings.json");
+        Settings s; s.wizardDone = true; s.favorites = {{"42", "Favorite"}, {"43", "Other"}};
+        s.rules = {{"game.exe", "42", "Game", 3}};
+        s.recognitionRules = {{"other.exe", "Window", "Other Game", {}, "43", "Other"}};
+        s.categoryCache.insert("steam:1", {"42", "Game"}); s.ignoredLibraries = {"steam:2"};
+        s.fontSize = 19; s.theme = 1; s.automatic = true; s.chattingDelay = 180; s.allowCategoryLookup = true;
+        s.termsVersion = s.privacyVersion = "old-policy"; s.termsUtc = s.privacyUtc = "2026-10-24T00:00:00Z";
+        auto legacy = s.json(); legacy.remove("wizardRevision"); legacy.remove("savedByVersion");
+        const auto bytes = QJsonDocument(legacy).toJson(); QFile file(path); CHECK(file.open(QIODevice::WriteOnly)); CHECK(file.write(bytes) == bytes.size()); file.close();
+        QString error; auto upgraded = Settings::load(path, &error); CHECK(error.isEmpty()); CHECK(upgraded.wizardDone); CHECK(!upgraded.consented());
+        CHECK(upgraded.json() == s.json()); CHECK(upgraded.save(path, &error));
+        const auto backups = QDir(temp.path()).entryList({"settings.json.backup-*"}, QDir::Files); CHECK(backups.size() == 1);
+        QFile backup(temp.filePath(backups[0])); CHECK(backup.open(QIODevice::ReadOnly)); CHECK(backup.readAll() == bytes);
+        CHECK(upgraded.save(path, &error)); CHECK(QDir(temp.path()).entryList({"settings.json.backup-*"}, QDir::Files).size() == 1);
+        CHECK(Settings::load(path, &error).json() == s.json());
+    });
     run("corrupt settings preserve original file", [] {
         QTemporaryDir temp; const auto path = temp.filePath("settings.json"); QFile file(path); CHECK(file.open(QIODevice::WriteOnly)); file.write("{broken"); file.close();
-        QString error; Settings::load(path, &error); CHECK(!error.isEmpty()); CHECK(file.open(QIODevice::ReadOnly)); CHECK(file.readAll() == "{broken");
+        QString error; Settings::load(path, &error); CHECK(!error.isEmpty()); CHECK(!Settings{}.save(path, &error)); CHECK(file.open(QIODevice::ReadOnly)); CHECK(file.readAll() == "{broken"); file.close();
+        const auto good = temp.filePath("good.json"); Settings saved; saved.favorites = {{"42", "Saved"}}; CHECK(saved.save(good, &error));
+        CHECK(!Settings::restoreBackup(path, good, &error)); CHECK(Settings::load(good, &error).favorites.size() == 1);
+        CHECK(Settings::restoreBackup(good, path, &error)); CHECK(Settings::load(path, &error).favorites.size() == 1);
+        const auto originals = QDir(temp.path()).entryList({"settings.json.before-restore-*"}, QDir::Files); CHECK(originals.size() == 1);
+        QFile original(temp.filePath(originals[0])); CHECK(original.open(QIODevice::ReadOnly)); CHECK(original.readAll() == "{broken");
+    });
+    run("future schema and invalid recognition rules cannot be overwritten", [] {
+        QTemporaryDir temp; const auto path = temp.filePath("settings.json");
+        for (bool future : {false, true}) {
+            auto data = Settings{}.json(); data["favorites"] = QJsonArray{QJsonObject{{"id", "42"}, {"name", "Saved"}}};
+            if (future) data["schema"] = 99; else data["recognitionRules"] = QJsonArray{QJsonObject{{"exe", "invalid"}}};
+            const auto bytes = QJsonDocument(data).toJson(); QFile file(path); CHECK(file.open(QIODevice::WriteOnly)); file.write(bytes); file.close();
+            QString error; const auto loaded = Settings::load(path, &error); CHECK(!error.isEmpty());
+            if (!future) CHECK(loaded.favorites.size() == 1);
+            CHECK(!Settings{}.save(path, &error)); CHECK(file.open(QIODevice::ReadOnly)); CHECK(file.readAll() == bytes);
+        }
     });
     run("Minecraft recognition without manual rules and Java false positives", [] {
         const auto minecraft = recognizeGame("javaw.exe", "Minecraft* 1.21.11");
