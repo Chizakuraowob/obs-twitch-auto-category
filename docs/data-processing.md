@@ -51,7 +51,7 @@
 
 ### 接續安裝
 
-更新接續程序（0.5.8）：檢查直播、錄影、重播緩衝與虛擬攝影機均已停止，再正常關閉 OBS。獨立本機 PowerShell 助手最多等待 120 秒，確認 OBS 已退出且無其他 OBS 後，再次核對 SHA-256 並啟動 Windows Installer。使用單次執行原則參數執行內建腳本，不更改系統執行原則、憑證信任或 Smart App Control。安裝精靈、UAC 與安全提示保留，不強制終止 OBS、不熱替換 DLL。Windows 政策仍可能阻止執行。成功代碼 0、1641、3010 才刪除此次 MSI；取消、失敗、OBS 未退出或雜湊不符時保留。updates 內的助手、.install.log、.update-error.log 不上傳，可自行刪除；安裝後由使用者重開 OBS。
+更新接續程序：檢查直播、錄影、重播緩衝與虛擬攝影機均已停止，再正常關閉 OBS。獨立本機 PowerShell 助手最多等待 120 秒，確認 OBS 已退出且無其他 OBS 後，再次核對 SHA-256，以 Windows 原生路徑啟動 Windows Installer。使用單次執行原則參數執行內建腳本，不更改系統執行原則、憑證信任或 Smart App Control。安裝精靈、UAC 與安全提示保留，不強制終止 OBS、不熱替換 DLL。Windows 政策仍可能阻止執行。成功代碼 0、1641、3010 才刪除此次 MSI；取消、失敗、OBS 未退出或雜湊不符時保留。updates 內的助手、.install.log、.update-error.log 不上傳，可自行刪除；安裝後由使用者重開 OBS。
 
 ## 刪除與匯出
 

@@ -16,7 +16,7 @@
 
 ## 安裝
 
-[**下載 Windows 安裝檔（.msi，v0.5.12）**](https://github.com/Chizakuraowob/obs-twitch-auto-category/releases/download/v0.5.12/twitch-category-assistant-0.5.12-windows-x64.msi) · [所有版本與更新說明](https://github.com/Chizakuraowob/obs-twitch-auto-category/releases)
+[**下載 Windows 安裝檔（.msi，v0.5.13）**](https://github.com/Chizakuraowob/obs-twitch-auto-category/releases/download/v0.5.13/twitch-category-assistant-0.5.13-windows-x64.msi) · [所有版本與更新說明](https://github.com/Chizakuraowob/obs-twitch-auto-category/releases)
 
 目前支援 **Windows 11 64 位元與 OBS Studio 32.2.2 64 位元官方安裝版**。MSI 會檢查 OBS 版本；其他版本與 OBS 可攜版尚不適用這個安裝方式。
 
@@ -37,6 +37,8 @@
 ### 安裝新版
 
 結束直播／錄影並關閉 OBS，直接執行新版 MSI，**不需要先解除安裝舊版**。收藏、我的遊戲與偏好會保留；重新開啟 OBS 後即可使用。條款或隱私政策更新時只會請你重新確認，不會重跑整個設定精靈。
+
+從 0.5.12 或更舊版本升級時，若內建更新出現「無法開啟此封裝」（錯誤 1619），請關閉 OBS，手動下載並執行上方新版 MSI。0.5.13 已修正造成此錯誤的更新安裝路徑。
 
 如果之前是自行複製檔案安裝，請先備份並移走舊的外掛資料夾，避免同一外掛重複載入。自行編譯與封裝的步驟請見 [開發指南](docs/development.md)。
 
@@ -93,7 +95,7 @@
 
 設定精靈的「通知偏好」與設定頁都能勾選「靜音模式」。開啟後，遊戲分類與 Just Chatting 提醒仍會顯示，但不發提示聲，也不搶走焦點；OBS 工作列圖示會閃爍。
 
-在「設定 → 版本與更新」可手動檢查新版，也可開啟啟動後自動檢查。開啟自動檢查後，發現未略過的新版本時，面板狀態下方會顯示提示與更新按鈕；在設定略過該版本後提示會消失。
+在「設定 → 版本與更新」可手動檢查新版，也可開啟啟動後自動檢查。開啟後，已同意目前條款與隱私政策時，外掛會在啟動約 10 秒後檢查一次，運行期間不會定時重複檢查；啟動後才開啟選項時，可按「立即檢查更新」。發現未略過的新版本時，面板狀態下方會顯示提示與更新按鈕；在設定略過該版本後提示會消失。
 
 按下更新後先確認版本資訊，再下載與驗證；下載完成後會再次詢問，確認後才關閉 OBS 並開啟安裝精靈。請先儲存工作，停止直播、錄影、重播緩衝與虛擬攝影機；輸出進行中不會關閉 OBS。完成精靈後重新開啟 OBS。安裝成功會刪除此次下載的 MSI；取消安裝或安裝失敗時，已驗證的 MSI 與安裝記錄會保留供重試。下載未完成或未通過驗證的檔案不會保留。Windows 權限與安全提示仍需自行確認。舊版若只有下載功能，請下載後手動關閉 OBS、執行 MSI。
 
