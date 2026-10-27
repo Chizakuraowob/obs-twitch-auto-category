@@ -14,7 +14,7 @@
 
 ## 安裝
 
-[**下載 Windows 安裝檔（.msi，v0.5.4）**](https://github.com/Chizakuraowob/obs-twitch-auto-category/releases/download/v0.5.4/twitch-category-assistant-0.5.4-windows-x64.msi) · [所有版本與更新說明](https://github.com/Chizakuraowob/obs-twitch-auto-category/releases)
+[**下載 Windows 安裝檔（.msi，v0.5.12）**](https://github.com/Chizakuraowob/obs-twitch-auto-category/releases/download/v0.5.12/twitch-category-assistant-0.5.12-windows-x64.msi) · [所有版本與更新說明](https://github.com/Chizakuraowob/obs-twitch-auto-category/releases)
 
 目前支援 **Windows 11 64 位元與 OBS Studio 32.2.2 64 位元官方安裝版**。MSI 會檢查 OBS 版本；其他版本與 OBS 可攜版尚不適用這個安裝方式。
 
