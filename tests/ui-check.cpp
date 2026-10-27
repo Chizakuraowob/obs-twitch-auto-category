@@ -73,6 +73,8 @@ public:
     QString clientId, channelId = "42", channelName = "Minecraft"; int searches = 0, reads = 0; bool failRead = false, unexpected = false;
 protected:
     QNetworkReply *createRequest(Operation, const QNetworkRequest &request, QIODevice *) override {
+        const auto http2 = request.attribute(QNetworkRequest::Http2AllowedAttribute);
+        if (!http2.isValid() || http2.toBool()) unexpected = true;
         const auto path = request.url().path(); QByteArray body; int status = 200, delay = 0;
         if (path == "/oauth2/device") body = R"({"device_code":"fixture","user_code":"TEST","verification_uri":"https://www.twitch.tv/activate","interval":5,"expires_in":60})";
         else if (path == "/oauth2/token") body = R"({"access_token":"fixture-access","refresh_token":"fixture-refresh","token_type":"bearer"})";
@@ -87,6 +89,45 @@ protected:
 
 namespace tca {
 struct DockTestAccess {
+    static bool staleSuggestion(Dock &dock) {
+        dock.config.developerMode = true; dock.config.autoDetect = true; dock.config.paused = false;
+        const Candidate game{"stale.exe", "42", "Game", 0}; dock.detected = {game}; dock.notifySuggestion(game);
+        auto *prompt = dock.suggestionPrompt.data(); if (!prompt) return false;
+        dock.detected.clear();
+        for (auto *button : prompt->buttons()) if (prompt->buttonRole(button) == QMessageBox::AcceptRole) { button->click(); break; }
+        return !dock.suggestionSession.handled.contains(suggestionKey(game)) && dock.statusLabel->text().contains("沒有更新");
+    }
+    static bool independentSuggestions(Dock &dock, bool apply) {
+        dock.scanTimer.stop(); dock.watcher.disconnect(&dock); dock.watcher.waitForFinished();
+        dock.config.developerMode = true; dock.config.autoDetect = true; dock.config.paused = false;
+        dock.config.rules = {{"first.exe", "42", "Same category", 0}, {"second.exe", "42", "Same category", 0}};
+        Processes snapshot; snapshot.available = true; snapshot.executables = {"first.exe", "second.exe"};
+        QPromise<Processes> promise; promise.start(); promise.addResult(snapshot); promise.finish(); dock.watcher.setFuture(promise.future()); dock.processScan();
+        if (dock.suggestionChoice->count() != 2) return false;
+        dock.suggestionChoice->setCurrentIndex(0); const auto first = dock.suggestionChoice->currentData().toString();
+        const auto second = dock.suggestionChoice->itemData(1).toString();
+        if (first == second) return false;
+        if (apply) dock.applySuggestion(); else {
+            dock.ignoreButton->click(); const auto rules = dock.config.rules;
+            dock.config.rules.clear(); dock.processScan(); dock.config.rules = rules; dock.processScan();
+        }
+        return dock.suggestionSession.handled.contains(first) && !dock.suggestionSession.handled.contains(second) &&
+            (apply || (dock.suggestionChoice->count() == 1 && dock.suggestionChoice->currentData().toString() == second));
+    }
+    static bool failedGameLink(Dock &dock) {
+        dock.searchCategories = {{"42", "New category", {}}};
+        { QSignalBlocker block(dock.searchList); dock.searchList->addItem("New category"); dock.searchList->setCurrentRow(0); }
+        dock.localGameChoice->addItem("Test game", "steam:1"); dock.linkLocalGame->setEnabled(true); dock.linkLocalGame->click();
+        return dock.config.categoryCache.value("steam:1").id == "43" && dock.statusLabel->text() != "已在本機連結：Test game → New category";
+    }
+    static bool failedLookup(Dock &dock) {
+        dock.config.allowCategoryLookup = dock.config.autoDetect = dock.config.detectLibraries = true; dock.lookupAttempted.insert("steam:2");
+        emit dock.client.categoryResolved("steam:2", {"42", "Game", {}});
+        return !dock.config.categoryCache.contains("steam:2");
+    }
+    static bool hasCachedGame(Dock &dock) { return dock.config.categoryCache.value("steam:1").id == "43"; }
+    static int savedFavorites(Dock &dock) { return dock.config.favorites.size(); }
+    static void settings(Dock &dock) { dock.settingsDialog(); }
     static void releaseNotes(Dock &dock) {
         dock.updater.latest.notes = "## 這個版本更新了什麼\n\n- **改善更新說明預覽**\n- 安裝成功後清除 MSI\n\n[專案網站](https://github.com/Chizakuraowob/obs-twitch-auto-category)";
         emit dock.updater.changed();
@@ -122,7 +163,7 @@ struct DockTestAccess {
         const bool previous = dock.config.quietMode; dock.config.quietMode = quiet;
         dock.notifySuggestion({idle ? "@idle" : "fixture.exe", idle ? "509658" : "42", idle ? "Just Chatting" : "Minecraft", 0});
         auto *prompt = dock.suggestionPrompt.data();
-        const bool valid = prompt && prompt->isVisible() && prompt->property("quietNotification").toBool() == quiet &&
+        const bool valid = prompt && prompt->isVisible() && prompt->textFormat() == Qt::PlainText && prompt->property("quietNotification").toBool() == quiet &&
             prompt->icon() == (quiet ? QMessageBox::NoIcon : QMessageBox::Information) &&
             prompt->testOption(QMessageBox::Option::DontUseNativeDialog) == quiet && prompt->testAttribute(Qt::WA_ShowWithoutActivating);
         const bool captured = path.isEmpty() || (prompt && prompt->grab().save(path));
@@ -310,6 +351,38 @@ static bool connectedUi(const QString &output)
     failedFavorite.findChild<QPushButton *>("favoriteRemove")->click();
     UI_CHECK(tca::DockTestAccess::favoriteCount(failedFavorite) == 1 && failedFavorite.findChild<QPushButton *>("favoriteRemove")->text() != "已移除");
     failedFavorite.stop();
+    for (bool apply : {false, true}) { QTemporaryDir fixture; tca::Dock candidates(fixture.path()); UI_CHECK(tca::DockTestAccess::independentSuggestions(candidates, apply)); candidates.stop(); }
+    { QTemporaryDir fixture; tca::Dock candidate(fixture.path()); UI_CHECK(tca::DockTestAccess::staleSuggestion(candidate)); candidate.stop(); }
+    for (bool lookup : {false, true}) {
+        QTemporaryDir fixture; tca::Settings saved; saved.categoryCache.insert("steam:1", {"43", "Original"});
+        const auto path = fixture.filePath("settings.json"); UI_CHECK(saved.save(path, &error)); tca::Dock failedCache(fixture.path());
+        { QFile file(path); UI_CHECK(file.open(QIODevice::WriteOnly | QIODevice::Truncate)); UI_CHECK(file.write("{broken") == 7); }
+        UI_CHECK(lookup ? tca::DockTestAccess::failedLookup(failedCache) : tca::DockTestAccess::failedGameLink(failedCache));
+        UI_CHECK(tca::DockTestAccess::hasCachedGame(failedCache)); failedCache.stop();
+    }
+    for (bool reset : {false, true}) {
+        QTemporaryDir fixture; tca::Settings saved; saved.favorites = {{"42", "Favorite"}}; saved.categoryCache.insert("steam:1", {"43", "Original"});
+        const auto path = fixture.filePath("settings.json"); UI_CHECK(saved.save(path, &error)); tca::Dock failedEdit(fixture.path());
+        int accountChanges = 0; QObject::connect(&tca::DockTestAccess::twitch(failedEdit), &tca::Client::accountChanged, &failedEdit, [&] { ++accountChanges; });
+        bool correct = false;
+        QTimer::singleShot(20, &failedEdit, [&] {
+            auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+            auto *button = dialog ? dialog->findChild<QPushButton *>(reset ? "clearUserData" : "clearCategoryCache") : nullptr;
+            if (!button) { if (dialog) dialog->reject(); return; }
+            { QFile file(path); if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate) || file.write("{broken") != 7) { dialog->reject(); return; } }
+            if (reset) QTimer::singleShot(20, &failedEdit, [&] {
+                auto *confirm = qobject_cast<QMessageBox *>(QApplication::activeModalWidget());
+                if (confirm) confirm->done(QMessageBox::Yes);
+                QTimer::singleShot(20, &failedEdit, [&] { if (auto *warning = qobject_cast<QMessageBox *>(QApplication::activeModalWidget())) warning->accept(); });
+            });
+            button->click();
+            auto *feedback = dialog->findChild<QLabel *>("cacheFeedback");
+            correct = tca::DockTestAccess::hasCachedGame(failedEdit) && tca::DockTestAccess::savedFavorites(failedEdit) == 1 && accountChanges == 0 &&
+                (reset || (feedback && !feedback->isHidden() && feedback->text().contains("失敗")));
+            dialog->reject();
+        });
+        tca::DockTestAccess::settings(failedEdit); UI_CHECK(correct); failedEdit.stop();
+    }
     auto *refresh = dock.findChild<QPushButton *>("refreshCurrent"); UI_CHECK(refresh && refresh->isEnabled());
     const auto reads = network.reads; refresh->click(); refresh->click();
     UI_CHECK(network.reads == reads + 1 && refresh->property("refreshing").toBool() && !refresh->isEnabled());
@@ -550,6 +623,9 @@ int main(int argc, char **argv)
             if (!dialog->grab().save(output + "/settings-light.png") ||
                 !combo->view()->window()->grab().save(output + "/theme-popup-light.png")) result = 24;
             combo->hidePopup();
+            auto *navigation = dialog->findChild<QComboBox *>("settingsNavigation"); auto *settingsScroll = dialog->findChild<QScrollArea *>();
+            if (!navigation || !settingsScroll || navigation->count() != 8) result = 91;
+            else { navigation->setCurrentIndex(5); if (settingsScroll->verticalScrollBar()->value() == 0 || navigation->currentIndex() != 0) result = 92; }
             tca::DockTestAccess::releaseNotes(light);
             auto *notes = dialog->findChild<QTextBrowser *>("releaseNotes");
             if (!notes || notes->toPlainText().contains("##") || notes->document()->firstBlock().blockFormat().headingLevel() != 2 ||
@@ -582,7 +658,10 @@ int main(int argc, char **argv)
         QTimer::singleShot(100, &app, [&] {
             auto *dialog = qobject_cast<QDialog *>(app.activeModalWidget()); auto *table = dialog ? dialog->findChild<QTableWidget *>("myGamesTable") : nullptr;
             if (!table || table->rowCount() != 3) { result = 44; if (dialog) dialog->reject(); return; }
+            auto *forget = dialog->findChild<QPushButton *>("forgetGame");
+            if (!forget || forget->isEnabled()) result = 93;
             table->setCurrentCell(1, 0);
+            if (!forget || !forget->isEnabled()) result = 94;
             for (auto *button : dialog->findChildren<QPushButton *>()) if (button->text() == "不是遊戲") { button->click(); break; }
             if (!tca::Settings::load(lightTemp.filePath("settings.json"), &error).rules[0].ignored) result = 45;
             if (!dialog->grab().save(output + "/my-games.png")) result = 46; dialog->reject();

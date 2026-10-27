@@ -55,6 +55,8 @@ public:
     bool unexpected = false;
 protected:
     QNetworkReply *createRequest(Operation, const QNetworkRequest &request, QIODevice *body) override {
+        const auto http2 = request.attribute(QNetworkRequest::Http2AllowedAttribute);
+        if (!http2.isValid() || http2.toBool()) unexpected = true;
         urls.append(request.url()); bodies.append(body ? body->readAll() : QByteArray{});
         requests.append(request);
         if (fixtures.isEmpty()) { unexpected = true; return new Reply(request, {500, "{}"}, this); }
@@ -294,6 +296,17 @@ int main(int argc, char **argv)
             QString error; const auto loaded = Settings::load(path, &error); CHECK(!error.isEmpty());
             if (!future) CHECK(loaded.favorites.size() == 1);
             CHECK(!Settings{}.save(path, &error)); CHECK(file.open(QIODevice::ReadOnly)); CHECK(file.readAll() == bytes);
+        }
+    });
+    run("oversized favorite and rule names cannot silently overwrite settings", [] {
+        QTemporaryDir temp; const auto path = temp.filePath("settings.json");
+        for (bool favorite : {false, true}) {
+            auto data = Settings{}.json(); const QString longName(257, 'x');
+            if (favorite) data["favorites"] = QJsonArray{QJsonObject{{"id", "42"}, {"name", longName}}};
+            else data["rules"] = QJsonArray{QJsonObject{{"exe", "game.exe"}, {"id", "42"}, {"name", longName}, {"priority", 0}, {"ignored", false}}};
+            const auto bytes = QJsonDocument(data).toJson(); QFile file(path); CHECK(file.open(QIODevice::WriteOnly)); CHECK(file.write(bytes) == bytes.size()); file.close();
+            QString error; Settings::load(path, &error); CHECK(!error.isEmpty()); CHECK(!Settings{}.save(path, &error));
+            CHECK(file.open(QIODevice::ReadOnly)); CHECK(file.readAll() == bytes);
         }
     });
     run("Minecraft recognition without manual rules and Java false positives", [] {

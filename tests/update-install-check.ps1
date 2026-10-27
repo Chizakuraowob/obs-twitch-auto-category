@@ -38,20 +38,27 @@ try {
         $script:canExit = $case -ne 'close-cancelled'
         if ($case -eq 'hash') { [IO.File]::WriteAllText($file, 'tampered') }
         $script:launched = 0; $failed = $false
-        try { Invoke-VerifiedUpdate -ObsProcessId 1 -ObsExecutable 'C:\OBS\obs64.exe' -Installer $file -Digest $digest } catch { $failed = $true }
+        try { Invoke-VerifiedUpdate -ObsProcessId 1 -ObsExecutable 'C:/OBS/obs64.exe' -Installer $file -Digest $digest } catch { $failed = $true }
         $success = $case -in @('success', 'reboot', 'closed-parent')
         $expectedLaunch = if ($case -in @('hash', 'other-obs', 'close-cancelled', 'wrong-parent')) { 0 } else { 1 }
         if ($failed -eq $success -or (Test-Path -LiteralPath $file) -eq $success -or $script:launched -ne $expectedLaunch) { throw "Failed case: $case" }
     }
     $eventName = 'Local\TCA-Update-Test-' + [guid]::NewGuid()
     $event = [Threading.EventWaitHandle]::new($false, [Threading.EventResetMode]::ManualReset, $eventName)
+    $proceedName = $eventName + '-continue'
+    $proceed = [Threading.EventWaitHandle]::new($true, [Threading.EventResetMode]::ManualReset, $proceedName)
     try {
         $script:parentRunning = $false; $script:running = $true; $script:launched = 0
-        try { Invoke-VerifiedUpdate -ObsProcessId 1 -ObsExecutable 'C:\OBS\obs64.exe' -Installer $known -Digest ('a' * 64) -ReadyEvent $eventName } catch {}
+        try { Invoke-VerifiedUpdate -ObsProcessId 1 -ObsExecutable 'C:\OBS\obs64.exe' -Installer $known -Digest ('a' * 64) -ReadyEvent $eventName -ProceedEvent $proceedName } catch {}
         if ($event.WaitOne(0)) { throw 'Invalid parameters acknowledged' }
-        try { Invoke-VerifiedUpdate -ObsProcessId 1 -ObsExecutable 'C:\OBS\obs64.exe' -Installer (Join-Path $temporary 'update wrong-parent.msi') -Digest ('a' * 64) -ReadyEvent $eventName } catch {}
+        try { Invoke-VerifiedUpdate -ObsProcessId 1 -ObsExecutable 'C:\OBS\obs64.exe' -Installer (Join-Path $temporary 'update wrong-parent.msi') -Digest ('a' * 64) -ReadyEvent $eventName -ProceedEvent ($proceedName + '-missing') } catch {}
+        if ($event.WaitOne(0) -or $script:launched) { throw 'Missing permission event must not acknowledge or launch' }
+        try { Invoke-VerifiedUpdate -ObsProcessId 1 -ObsExecutable 'C:\OBS\obs64.exe' -Installer (Join-Path $temporary 'update wrong-parent.msi') -Digest ('a' * 64) -ReadyEvent $eventName -ProceedEvent $proceedName } catch {}
         if (!$event.WaitOne(0) -or $script:launched) { throw 'Readiness handshake failed' }
-    } finally { $event.Dispose() }
+        [void]$event.Reset(); [void]$proceed.Reset(); $script:running = $false; $message = ''
+        try { Invoke-VerifiedUpdate -ObsProcessId 1 -ObsExecutable 'C:\OBS\obs64.exe' -Installer (Join-Path $temporary 'update wrong-parent.msi') -Digest ('a' * 64) -ReadyEvent $eventName -ProceedEvent $proceedName } catch { $message = $_.Exception.Message }
+        if (!$event.WaitOne(0) -or $script:launched -or $message -notlike '*not started*') { throw 'Timed-out handshake must not launch' }
+    } finally { $event.Dispose(); $proceed.Dispose() }
     Write-Output 'Update handoff: 9 scenarios, SHA-256 and readiness handshake passed; no OBS closed or MSI executed.'
 } finally {
     $resolved = [IO.Path]::GetFullPath($temporary)

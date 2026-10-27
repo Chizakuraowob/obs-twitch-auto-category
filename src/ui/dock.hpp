@@ -84,7 +84,7 @@ private:
     int libraryCount = 0;
     QPushButton *favoriteAdd, *favoriteApply, *favoriteRemove;
     QPushButton *connectButton, *applyButton, *moreButton, *suggestionApply, *resumeButton;
-    QPushButton *activityToggle, *mappingButton, *ignoreButton;
+    QPushButton *activityToggle, *ignoreButton;
     QVector<Category> searchCategories;
     QVector<Candidate> detected;
     QSet<QString> ignored;

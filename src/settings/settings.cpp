@@ -154,6 +154,11 @@ static Settings decodeSettings(const QByteArray &bytes, QString *error)
     for (const auto &key : {"favorites", "rules", "recognitionRules", "ignoredLibraries"}) {
         if (object.contains(key) && !object[key].isArray()) { *error = "設定集合格式錯誤，已停止儲存以保留原檔"; return settings; }
     }
+    for (const auto &key : {"favorites", "rules"}) {
+        for (const auto &entry : object[key].toArray()) {
+            if (entry.toObject()["name"].toString().size() > 256) { *error = "收藏或規則名稱過長，已停止儲存以保留原檔"; return settings; }
+        }
+    }
     if ((object.contains("categoryCache") && !object["categoryCache"].isObject()) ||
         settings.favorites.size() != object["favorites"].toArray().size() ||
         settings.rules.size() != object["rules"].toArray().size() ||

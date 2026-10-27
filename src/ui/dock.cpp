@@ -36,6 +36,7 @@
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QScrollArea>
+#include <QScrollBar>
 #include <QSpinBox>
 #include <QStyleHints>
 #include <QTableWidget>
@@ -224,14 +225,14 @@ Dock::Dock(QString settingsDirectory, QWidget *parent, QNetworkAccessManager *tr
         setStatus("已收藏：" + c.name, Client::StatusLevel::Success); addActivity("已收藏：" + c.name);
     });
     moreButton = button("載入更多"); moreButton->hide(); search->addWidget(moreButton);
-    mappingButton = button("＋ 記住正在玩的遊戲"); mappingButton->setProperty("link", true); search->addWidget(mappingButton);
-    localGameChoice = new QComboBox; localGameChoice->setAccessibleName("偵測到的本機遊戲"); localGameChoice->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon); localGameChoice->setMinimumContentsLength(12); search->addWidget(localGameChoice);
-    linkLocalGame = button("將選取分類連結到這款本機遊戲"); linkLocalGame->setProperty("secondary", true); search->addWidget(linkLocalGame);
+    localGameChoice = new QComboBox; localGameChoice->setObjectName("localGameChoice"); localGameChoice->setAccessibleName("偵測到的本機遊戲"); localGameChoice->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon); localGameChoice->setMinimumContentsLength(12); search->addWidget(localGameChoice);
+    linkLocalGame = button("將選取分類連結到這款本機遊戲"); linkLocalGame->setObjectName("linkLocalGame"); linkLocalGame->setProperty("secondary", true); search->addWidget(linkLocalGame);
     connect(linkLocalGame, &QPushButton::clicked, this, [this] {
         const int row = searchList->currentRow(); const auto key = localGameChoice->currentData().toString();
         if (row < 0 || row >= searchCategories.size() || !validLibraryKey(key)) return;
         if (!config.categoryCache.contains(key) && config.categoryCache.size() >= 1000) { setStatus("分類對應快取已滿，請先在設定清除快取"); return; }
-        const auto category = searchCategories[row]; config.categoryCache.insert(key, {category.id, category.name}); save();
+        const auto previous = config.categoryCache; const auto category = searchCategories[row]; config.categoryCache.insert(key, {category.id, category.name});
+        if (!save()) { config.categoryCache = previous; return; }
         stableKey.clear(); autoAttemptKey.clear(); setStatus("已在本機連結：" + localGameChoice->currentText() + " → " + category.name, Client::StatusLevel::Success); scan();
     });
     searchTimer.setSingleShot(true); searchTimer.setInterval(400);
@@ -257,7 +258,6 @@ Dock::Dock(QString settingsDirectory, QWidget *parent, QNetworkAccessManager *tr
     connect(moreButton, &QPushButton::clicked, this, [this] { searching = true; moreButton->setEnabled(false); client.search(searchQuery, cursor); });
     connect(applyButton, &QPushButton::clicked, this, &Dock::applySelected);
     connect(searchList, &QListWidget::currentRowChanged, this, [this] { updateAccount(); });
-    connect(mappingButton, &QPushButton::clicked, this, &Dock::pickGame);
     auto *suggestion = card(layout, "智慧分類建議"); suggestion->parentWidget()->setObjectName("suggestionCard"); suggestionLabel = label("尚無遊戲候選；可按「我的遊戲」新增並記住"); suggestion->addWidget(suggestionLabel);
     unknownLabel = label("未辨識的視窗只作參考，不會被當成遊戲。"); unknownLabel->setObjectName("unknownRecognitionStatus"); suggestion->addWidget(unknownLabel);
     reviewUnknownButton = button("手動新增遊戲偵測"); reviewUnknownButton->setObjectName("reviewUnknownGame"); reviewUnknownButton->setProperty("secondary", true); reviewUnknownButton->setEnabled(true); suggestion->addWidget(reviewUnknownButton);
@@ -268,8 +268,8 @@ Dock::Dock(QString settingsDirectory, QWidget *parent, QNetworkAccessManager *tr
     suggestionApply->setProperty("primary", true);
     ignoreButton = button("本次遊戲不再提醒"); ignoreButton->setProperty("link", true); ignoreButton->setToolTip("略過上方選取的建議，不更改 Twitch 分類；同次遊戲執行期間不再提醒。"); suggestion->addWidget(ignoreButton);
     connect(ignoreButton, &QPushButton::clicked, this, [this] {
-        const auto id = suggestionChoice->currentData().toString(); if (!id.isEmpty()) ignored.insert(id);
-        for (const auto &candidate : detected) if (candidate.id == id) suggestionSession.handled.insert(suggestionKey(candidate));
+        const auto key = suggestionChoice->currentData().toString(); if (key.isEmpty()) return;
+        ignored.insert(key); suggestionSession.handled.insert(key);
         if (suggestionPrompt) suggestionPrompt->close(); processScan();
     });
     resumeHint = label("你已手動選擇分類，自動切換已暫停。"); resumeHint->setObjectName("resumeCategoryHint"); resumeHint->setProperty("role", "muted"); resumeHint->hide(); suggestion->addWidget(resumeHint);
@@ -288,7 +288,7 @@ Dock::Dock(QString settingsDirectory, QWidget *parent, QNetworkAccessManager *tr
         lookupPending = false;
         if (!config.allowCategoryLookup || !config.autoDetect || !config.detectLibraries || !lookupAttempted.contains(key) || stopped) return;
         if (category.id.isEmpty()) { addActivity("找不到唯一同名 Twitch 分類；請搜尋後連結本機遊戲"); return; }
-        if (!config.categoryCache.contains(key) && config.categoryCache.size() < 1000) { config.categoryCache.insert(key, {category.id, category.name}); save(); }
+        if (!config.categoryCache.contains(key) && config.categoryCache.size() < 1000) { config.categoryCache.insert(key, {category.id, category.name}); if (!save()) config.categoryCache.remove(key); }
         scan();
     });
     connect(&client, &Client::accountChanged, this, [this] {
@@ -439,14 +439,13 @@ void Dock::updateAccount()
     currentArt->setVisible(client.connected());
     searchList->setVisible(client.connected() && !searchCategories.isEmpty());
     applyButton->setVisible(!searchCategories.isEmpty());
-    mappingButton->setVisible(searchList->currentRow() >= 0);
     localGameChoice->setVisible(!localGames.isEmpty());
     linkLocalGame->setVisible(!localGames.isEmpty());
     linkLocalGame->setEnabled(selected >= 0 && selected < searchCategories.size() && localGameChoice->currentIndex() >= 0);
     const bool hasSuggestion = suggestionChoice->count() > 0;
     suggestionChoice->setVisible(hasSuggestion); suggestionApply->setVisible(hasSuggestion); ignoreButton->setVisible(hasSuggestion);
     resumeButton->setVisible(manualOverride && config.automatic); resumeHint->setVisible(manualOverride && config.automatic);
-    if (!client.connected()) { searchCategories.clear(); searchList->clear(); searchList->setFixedHeight(90); moreButton->hide(); applyButton->hide(); mappingButton->hide(); }
+    if (!client.connected()) { searchCategories.clear(); searchList->clear(); searchList->setFixedHeight(90); moreButton->hide(); applyButton->hide(); }
     if (!statusResetTimer.isActive()) restoreStatus();
 }
 void Dock::favoriteFeedback(QPushButton *target, const QString &message)
@@ -486,12 +485,13 @@ void Dock::applySelected()
 }
 void Dock::applySuggestion()
 {
-    const auto id = suggestionChoice->currentData().toString(); if (id.isEmpty()) return;
-    for (const auto &candidate : detected) if (candidate.id == id) suggestionSession.handled.insert(suggestionKey(candidate));
+    const auto key = suggestionChoice->currentData().toString(); if (key.isEmpty() || (!config.developerMode && (!config.consented() || !client.connected() || client.busy()))) return;
+    const auto candidate = std::find_if(detected.cbegin(), detected.cend(), [&](const Candidate &c) { return suggestionKey(c) == key; });
+    if (candidate == detected.cend()) return;
+    suggestionSession.handled.insert(key);
     if (suggestionPrompt) suggestionPrompt->close();
     if (config.developerMode) { addActivity("開發者預演：" + suggestionChoice->currentText() + "（未更新 Twitch）"); return; }
-    if (!config.consented()) return;
-    for (const auto &c : detected) if (c.id == id) { addActivity("使用者套用建議：" + c.name); client.apply({c.id, c.name, {}}); return; }
+    addActivity("使用者套用建議：" + candidate->name); client.apply({candidate->id, candidate->name, {}});
 }
 void Dock::notifySuggestion(const Candidate &candidate)
 {
@@ -501,7 +501,7 @@ void Dock::notifySuggestion(const Candidate &candidate)
         QString("偵測到：%1\n目前 Twitch 分類：%2\n%3")
             .arg(candidate.name, client.current().name.isEmpty() ? "尚未取得" : client.current().name,
                  config.developerMode ? "開發者模式：只預演，不修改 Twitch。" : "要更新直播分類嗎？"), QMessageBox::NoButton, this);
-    suggestionPrompt = prompt; prompt->setObjectName("categorySuggestionPrompt");
+    suggestionPrompt = prompt; prompt->setObjectName("categorySuggestionPrompt"); prompt->setTextFormat(Qt::PlainText);
     prompt->setProperty("quietNotification", config.quietMode);
     if (config.quietMode) prompt->setOption(QMessageBox::Option::DontUseNativeDialog);
     prompt->setProperty("idleSuggestion", idle);
@@ -518,12 +518,13 @@ void Dock::notifySuggestion(const Candidate &candidate)
     const bool preview = config.developerMode;
     connect(prompt, &QMessageBox::buttonClicked, this, [this, apply, candidate, preview, idle](QAbstractButton *clicked) {
         if (stopped || preview != config.developerMode || !config.suggestionsEnabled(streaming)) return;
-        if (!idle) suggestionSession.handled.insert(suggestionKey(candidate));
-        if (clicked != apply) return;
+        if (clicked != apply) { if (!idle) suggestionSession.handled.insert(suggestionKey(candidate)); return; }
         bool stillDetected = false; for (const auto &c : detected) if (c.id == candidate.id && c.executable == candidate.executable) stillDetected = true;
-        if (idle ? !suggestionSession.idleReady : !stillDetected) return;
+        if (idle ? !suggestionSession.idleReady : !stillDetected) { setStatus("遊戲狀態已變更，這次沒有更新分類"); return; }
+        if (!preview && (!config.consented() || !client.connected() || client.busy())) { setStatus("目前無法更新分類，請確認連線或等待其他更新完成"); return; }
+        if (!idle) suggestionSession.handled.insert(suggestionKey(candidate));
         if (preview) addActivity("開發者預演：" + candidate.name + "（未更新 Twitch）");
-        else if (config.consented() && client.connected() && !client.busy()) { addActivity("使用者確認建議：" + candidate.name); client.apply({candidate.id, candidate.name, {}}); }
+        else { addActivity("使用者確認建議：" + candidate.name); client.apply({candidate.id, candidate.name, {}}); }
     });
     prompt->show();
     if (config.quietMode) {
@@ -625,8 +626,8 @@ void Dock::pickGame()
     buttons->button(QDialogButtonBox::Ok)->setText("選擇這個遊戲"); buttons->button(QDialogButtonBox::Cancel)->setText("取消"); buttons->button(QDialogButtonBox::Ok)->setEnabled(false);
     QVector<WindowEvidence> windows; QFutureWatcher<Processes> reader;
     connect(&reader, &QFutureWatcher<Processes>::finished, &dialog, [&] {
-        windows = reader.result().windows; list->clear(); for (const auto &w : windows) list->addItem(w.title + " · " + w.executable);
-        status->setText(windows.isEmpty() ? "沒有可選視窗，請開啟遊戲後重新讀取。" : "選取遊戲視窗後，下一步選擇 Twitch 分類。"); refresh->setEnabled(true);
+        const auto snapshot = reader.result(); windows = snapshot.windows; list->clear(); for (const auto &w : windows) list->addItem(w.title + " · " + w.executable);
+        status->setText(!snapshot.available ? "無法讀取本機視窗，請稍後重試。" : windows.isEmpty() ? "沒有可選視窗，請開啟遊戲後重新讀取。" : "選取遊戲視窗後，下一步選擇 Twitch 分類。"); refresh->setEnabled(true);
     });
     auto read = [&] { if (reader.isRunning()) return; refresh->setEnabled(false); buttons->button(QDialogButtonBox::Ok)->setEnabled(false); reader.setFuture(QtConcurrent::run([] { return scanProcesses(false, {}, false, true); })); };
     connect(refresh, &QPushButton::clicked, &dialog, read);
@@ -653,7 +654,8 @@ void Dock::recognitionDialog()
     }; populate();
     auto finishEdit = [&](const Settings &old) { if (!save()) config = old; detected.clear(); stableKey.clear(); const bool played = suggestionSession.played; suggestionSession = {}; suggestionSession.played = played; if (suggestionPrompt) suggestionPrompt->close(); scan(); populate(); };
     connect(add, &QPushButton::clicked, &dialog, [&] { pickGame(); populate(); });
-    auto *change = button("更改分類"); change->setProperty("secondary", true); layout->addWidget(change);
+    auto *actions = new QHBoxLayout; layout->addLayout(actions);
+    auto *change = button("更改分類"); change->setObjectName("changeGameCategory"); change->setProperty("secondary", true); actions->addWidget(change);
     connect(change, &QPushButton::clicked, &dialog, [&] {
         const int row = table->currentRow(); if (row < 0) return;
         QDialog choose(&dialog); choose.setWindowTitle("選擇 Twitch 分類"); auto *v = new QVBoxLayout(&choose); v->addWidget(label("選擇搜尋結果或我的最愛；沒有想要的分類時，先回主畫面搜尋。")); auto *box = new QComboBox; v->addWidget(box); QSet<QString> ids;
@@ -667,8 +669,8 @@ void Dock::recognitionDialog()
         else { config.categoryCache[key.toString()] = {id, name}; config.ignoredLibraries.removeAll(key.toString()); }
         finishEdit(old);
     });
-    auto *ignore = button("不是遊戲"); layout->addWidget(ignore);
-    auto *remove = button("忘記這款遊戲"); remove->setProperty("danger", true); layout->addWidget(remove);
+    auto *ignore = button("不是遊戲"); ignore->setObjectName("ignoreGame"); actions->addWidget(ignore);
+    auto *remove = button("忘記遊戲"); remove->setObjectName("forgetGame"); remove->setProperty("danger", true); actions->addWidget(remove);
     auto edit = [&](bool forget) {
         const int row = table->currentRow(); if (row < 0) return; const auto old = config; auto *item = table->item(row, 0); const auto key = item->data(Qt::UserRole + 1);
         if (item->data(Qt::UserRole).toInt() == 0) { if (forget) config.recognitionRules.removeAt(key.toInt()); else { auto &r = config.recognitionRules[key.toInt()]; r.ignored = true; r.categoryId.clear(); r.categoryName.clear(); } }
@@ -677,7 +679,9 @@ void Dock::recognitionDialog()
         finishEdit(old);
     };
     connect(remove, &QPushButton::clicked, &dialog, [&] { edit(true); }); connect(ignore, &QPushButton::clicked, &dialog, [&] { edit(false); });
-    auto *details = button("進階辨識資訊"); layout->addWidget(details);
+    auto *details = button("進階辨識資訊"); details->setObjectName("gameDetails"); layout->addWidget(details);
+    auto selectionChanged = [=] { const bool selected = table->currentRow() >= 0; change->setEnabled(selected); ignore->setEnabled(selected); remove->setEnabled(selected); details->setEnabled(selected); };
+    connect(table, &QTableWidget::itemSelectionChanged, &dialog, selectionChanged); selectionChanged();
     connect(details, &QPushButton::clicked, &dialog, [&] { const int row = table->currentRow(); if (row < 0) return; const auto *item = table->item(row, 0); const auto key = item->data(Qt::UserRole + 1); QString text;
         if (item->data(Qt::UserRole).toInt() == 0) { const auto &r = config.recognitionRules[key.toInt()]; text = "程序：" + r.executable + "\n視窗類別：" + r.windowClass + "\n標題：" + r.title + "\n路徑指紋：" + r.pathHash; }
         else if (item->data(Qt::UserRole).toInt() == 1) text = "程序：" + config.rules[key.toInt()].executable; else text = "遊戲庫識別：" + key.toString();
@@ -748,14 +752,14 @@ void Dock::processScan()
         (config.developerMode || client.connected()) && client.current().id != "509658") {
         notifySuggestion({"@idle", "509658", "Just Chatting", 0});
     }
-    QSet<QString> running;
-    for (const auto &c : detected) running.insert(c.id);
-    ignored.intersect(running);
+    for (auto it = ignored.begin(); it != ignored.end();) {
+        if (!suggestionSession.handled.contains(*it)) it = ignored.erase(it); else ++it;
+    }
     if (detected.isEmpty()) autoAttemptKey.clear();
     QVector<Candidate> eligible;
-    for (const auto &c : detected) if (!ignored.contains(c.id)) eligible.append(c);
+    for (const auto &c : detected) if (!ignored.contains(suggestionKey(c))) eligible.append(c);
     const auto previous = suggestionChoice->currentData().toString(); suggestionChoice->clear();
-    for (const auto &c : eligible) suggestionChoice->addItem(c.name + " · " + c.executable, c.id);
+    for (const auto &c : eligible) suggestionChoice->addItem(c.name + " · " + c.executable, suggestionKey(c));
     const int chosen = chooseCandidate(eligible, processes.foreground, config.multiGame);
     if (chosen >= 0) suggestionChoice->setCurrentIndex(chosen);
     else { suggestionChoice->setCurrentIndex(suggestionChoice->findData(previous)); }
@@ -804,7 +808,7 @@ void Dock::fetchArt(const Category &category)
     if (artCache.contains(category.id)) { show(artCache.value(category.id)); return; }
     if (pendingArt.contains(category.id)) return;
     const QUrl url(category.art); if (url.scheme() != "https" || url.host() != "static-cdn.jtvnw.net" || !url.userInfo().isEmpty()) return;
-    QNetworkRequest req(url); req.setTransferTimeout(10000); req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
+    QNetworkRequest req(url); req.setAttribute(QNetworkRequest::Http2AllowedAttribute, false); req.setTransferTimeout(10000); req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
     auto *reply = images.get(req); pendingArt.insert(category.id);
     connect(reply, &QNetworkReply::readyRead, this, [reply] { if (reply->bytesAvailable() > 1024 * 1024) reply->abort(); });
     connect(reply, &QNetworkReply::finished, this, [this, reply, id = category.id, show] {
@@ -933,7 +937,10 @@ void Dock::settingsDialog()
     if (settingsReadError) { recoverSettings(); return; }
     bool openWizard = false, openAccount = false;
     QDialog dialog(this); dialog.setWindowTitle("設定"); dialog.setStyleSheet(themeSheet(config)); dialog.resize(500, 600);
-    auto *outer = new QVBoxLayout(&dialog); auto *scroll = new QScrollArea; scroll->setWidgetResizable(true); outer->addWidget(scroll);
+    auto *outer = new QVBoxLayout(&dialog);
+    auto *navigation = new QComboBox; navigation->setObjectName("settingsNavigation"); navigation->setAccessibleName("快速前往設定區域");
+    navigation->addItems({"快速前往設定區域…", "開始與設定精靈", "Twitch 帳號", "遊戲偵測與分類", "外觀", "版本與更新", "進階選項", "關於與法律資訊"}); outer->addWidget(navigation);
+    auto *scroll = new QScrollArea; scroll->setWidgetResizable(true); outer->addWidget(scroll);
     auto *body = new QWidget; auto *layout = new QVBoxLayout(body); scroll->setWidget(body);
     auto *setupCard = card(layout, "開始與設定精靈");
     setupCard->addWidget(label("重新查看功能說明、登入 Twitch 與設定更新偏好。"));
@@ -967,7 +974,13 @@ void Dock::settingsDialog()
     auto *lookup = new QCheckBox("向 Twitch 查詢遊戲名稱（聯網）"); lookup->setObjectName("allowCategoryLookup"); lookup->setChecked(config.allowCategoryLookup); detection->addWidget(lookup);
     detection->addWidget(label("預設不傳送偵測資料。啟用後只向 Twitch 傳送正在執行的遊戲名稱與 OAuth 必要資訊；不傳送程序／路徑／完整遊戲庫。僅採用唯一同名分類，結果保存在本機。"));
     auto *clearCache = button("清除分類對應快取"); clearCache->setProperty("danger", true); detection->addWidget(clearCache);
-    connect(clearCache, &QPushButton::clicked, &dialog, [this] { config.categoryCache.clear(); lookupAttempted.clear(); save(); setStatus("已清除本機分類對應；保留收藏與自訂程序規則"); });
+    auto *cacheFeedback = label({}); cacheFeedback->setObjectName("cacheFeedback"); cacheFeedback->hide(); detection->addWidget(cacheFeedback);
+    clearCache->setObjectName("clearCategoryCache");
+    connect(clearCache, &QPushButton::clicked, &dialog, [this, cacheFeedback] {
+        const auto previous = config.categoryCache; config.categoryCache.clear();
+        if (!save()) { config.categoryCache = previous; cacheFeedback->setText("清除失敗，原有快取已保留。請檢查設定檔。"); cacheFeedback->show(); return; }
+        lookupAttempted.clear(); cacheFeedback->setText("已清除分類快取，收藏和規則已保留。"); cacheFeedback->show(); setStatus("已清除本機分類對應；保留收藏與自訂程序規則");
+    });
     auto *chatting = new QCheckBox("遊戲結束後建議切換 Just Chatting"); chatting->setObjectName("chattingSuggestion"); chatting->setChecked(config.chattingSuggestion); detection->addWidget(chatting);
     detection->addWidget(label("等待時間：15–600 秒（最長 10 分鐘）。請輸入範圍內的整數。"));
     auto *chattingDelay = new QSpinBox; chattingDelay->setObjectName("chattingDelay"); chattingDelay->setRange(15, 600); chattingDelay->setSuffix(" 秒"); chattingDelay->setValue(config.chattingDelay); chattingDelay->setEnabled(chatting->isChecked()); detection->addWidget(chattingDelay);
@@ -1018,11 +1031,13 @@ void Dock::settingsDialog()
         id = new QLineEdit(config.clientId); id->setMaxLength(128); devLayout->addWidget(id); developer->hide(); advanced->addWidget(developer);
         connect(developerToggle, &QPushButton::toggled, developer, &QWidget::setVisible);
     }
-    auto *clear = button("清除本機資料…"); clear->setProperty("danger", true); advanced->addWidget(clear);
+    auto *clear = button("清除本機資料…"); clear->setObjectName("clearUserData"); clear->setProperty("danger", true); advanced->addWidget(clear);
     connect(clear, &QPushButton::clicked, &dialog, [&] {
         if (QMessageBox::question(&dialog, "清除本機資料", "刪除偏好、遊戲映射、同意紀錄、本次活動與目前帳號憑證，並嘗試撤銷 Twitch 授權？", QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes) return;
-        client.logout(); config = {}; suggestionSession = {}; ignored.clear(); detected.clear(); manualOverride = false; stableKey.clear(); autoAttemptKey.clear();
-        pendingWindow = {}; observedWindows.clear();   reviewUnknownButton->setEnabled(true); activityList->clear(); artCache.clear(); save(); theme(); refreshFavorites(); updateAccount(); dialog.reject();
+        const auto previous = config; config = {};
+        if (!save()) { config = previous; QMessageBox::warning(&dialog, "清除失敗", "無法保存清除結果，原有設定與帳號保持不變。"); return; }
+        client.logout(); suggestionSession = {}; ignored.clear(); lookupAttempted.clear(); detected.clear(); manualOverride = false; stableKey.clear(); autoAttemptKey.clear();
+        pendingWindow = {}; observedWindows.clear(); reviewUnknownButton->setEnabled(true); activityList->clear(); artCache.clear(); theme(); refreshFavorites(); updateAccount(); dialog.reject();
     });
     auto *info = card(layout, "關於與法律資訊");
     auto *aboutButton = button("關於、貢獻者與開源授權"); aboutButton->setObjectName("openAbout"); info->addWidget(aboutButton);
@@ -1032,6 +1047,12 @@ void Dock::settingsDialog()
     auto *privacyButton = button("隱私權政策"); privacyButton->setObjectName("openPrivacy"); info->addWidget(privacyButton);
     connect(privacyButton, &QPushButton::clicked, this, [this] { document("隱私權政策"); });
     info->addWidget(label(QString("v%1.%2 · %3\n%4 · %5\nGPL v2 或更新版本 · 第三方保有其著作權").arg(PluginVersion, ProductRevision, ProductCopyright, ProductAuthor, ProductEmail)));
+    const QVector<QWidget *> sections{nullptr, setupCard->parentWidget(), account->parentWidget(), detection->parentWidget(), appearance->parentWidget(), updates->parentWidget(), advanced->parentWidget(), info->parentWidget()};
+    connect(navigation, &QComboBox::currentIndexChanged, &dialog, [=](int index) {
+        if (index <= 0 || index >= sections.size()) return;
+        scroll->verticalScrollBar()->setValue(sections[index]->mapTo(body, QPoint{}).y());
+        const QSignalBlocker blocker(navigation); navigation->setCurrentIndex(0);
+    });
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel); outer->addWidget(buttons);
     buttons->button(QDialogButtonBox::Save)->setText("儲存"); buttons->button(QDialogButtonBox::Cancel)->setText("取消");
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
@@ -1041,14 +1062,14 @@ void Dock::settingsDialog()
         const auto previous = config;
         const auto newId = id ? id->text().trimmed() : config.clientId;
         if (!QRegularExpression("^[a-zA-Z0-9]{0,128}$").match(newId).hasMatch()) { QMessageBox::warning(&dialog, "Client ID", "Client ID 只可包含英數字"); return; }
-        if (newId != config.clientId) client.logout();
         config.clientId = newId; config.theme = themeBox->currentIndex(); config.automatic = update->currentIndex() == 1;
         config.fontFamily = fontBox->currentFont().family(); config.fontSize = fontSize->value(); config.animations = animationBox->isChecked();
         config.multiGame = multi->currentIndex(); config.notifications = notifications->isChecked(); config.quietMode = quiet->isChecked(); config.liveOnly = live->isChecked(); config.paused = pause->isChecked();
         config.developerMode = developerMode->isChecked();
-        config.checkUpdates = autoCheck->isChecked(); config.chattingSuggestion = chatting->isChecked(); config.chattingDelay = chattingDelay->value(); config.learnUnknown = learn->isChecked(); config.autoDetect = autoDetect->isChecked(); config.detectLibraries = libraries->isChecked(); config.allowCategoryLookup = lookup->isChecked(); lookupAttempted.clear();
-        stableKey.clear(); notificationKey.clear(); if (suggestionPrompt) suggestionPrompt->close();
+        config.checkUpdates = autoCheck->isChecked(); config.chattingSuggestion = chatting->isChecked(); config.chattingDelay = chattingDelay->value(); config.learnUnknown = learn->isChecked(); config.autoDetect = autoDetect->isChecked(); config.detectLibraries = libraries->isChecked(); config.allowCategoryLookup = lookup->isChecked();
         if (!save()) { config = previous; QMessageBox::warning(&dialog, "未儲存", "無法儲存設定，原有檔案未被取代。請檢查設定目錄或還原備份。"); return; }
+        if (newId != previous.clientId) client.logout();
+        lookupAttempted.clear(); stableKey.clear(); notificationKey.clear(); if (suggestionPrompt) suggestionPrompt->close();
         suggestionSession.pause(); autoAttemptKey.clear(); lastAuto = 0; theme(); updateAccount(); scan(); dialog.accept();
     });
     dialog.exec();

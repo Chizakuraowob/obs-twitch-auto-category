@@ -258,9 +258,10 @@ Processes scanProcesses(bool libraries, const QStringList &learnedExecutables, b
             games.parents.insert(entry.th32ProcessID, entry.th32ParentProcessID);
             if (entry.th32ProcessID == foreground) result.foreground = exe;
         } while (Process32NextW(snapshot, &entry));
+        if (GetLastError() != ERROR_NO_MORE_FILES) result.available = false;
     }
     CloseHandle(snapshot);
-    EnumWindows(inspectGameWindow, reinterpret_cast<LPARAM>(&games));
+    if (!result.available || !EnumWindows(inspectGameWindow, reinterpret_cast<LPARAM>(&games))) return {};
     result.recognizedGames = games.games;
     result.localGames = games.running; result.libraryCount = games.installed.size();
     result.windows = games.windows;

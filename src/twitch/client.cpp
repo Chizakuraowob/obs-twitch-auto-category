@@ -46,6 +46,7 @@ void Client::request(const QByteArray &method, const QUrl &url, const QByteArray
         callback({429, {}, false, false}); return;
     }
     QNetworkRequest req(url);
+    req.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
     req.setTransferTimeout(15000);
     req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
     req.setRawHeader("Accept", "application/json");

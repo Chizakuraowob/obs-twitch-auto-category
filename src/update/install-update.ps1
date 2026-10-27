@@ -3,7 +3,8 @@ param(
     [string]$ObsExecutable,
     [string]$Installer,
     [string]$Digest,
-    [string]$ReadyEvent
+    [string]$ReadyEvent,
+    [string]$ProceedEvent
 )
 
 function Get-UpdateDigest([string]$Path) {
@@ -14,19 +15,25 @@ function Get-UpdateDigest([string]$Path) {
 }
 
 function Invoke-VerifiedUpdate {
-    param([int]$ObsProcessId, [string]$ObsExecutable, [string]$Installer, [string]$Digest, [string]$ReadyEvent)
+    param([int]$ObsProcessId, [string]$ObsExecutable, [string]$Installer, [string]$Digest, [string]$ReadyEvent, [string]$ProceedEvent)
     $ErrorActionPreference = 'Stop'
     if ($ObsProcessId -le 0 -or $Digest -notmatch '^[a-fA-F0-9]{64}$' -or [IO.Path]::GetExtension($Installer) -ine '.msi') {
         throw 'Invalid update parameters. The installer has been kept.'
     }
     $process = Get-Process -Id $ObsProcessId -ErrorAction SilentlyContinue
     if ($process) {
-        if ($process.Path -ine $ObsExecutable) { throw 'OBS process changed. The installer has been kept.' }
+        if ([IO.Path]::GetFullPath($process.Path) -ine [IO.Path]::GetFullPath($ObsExecutable)) { throw 'OBS process changed. The installer has been kept.' }
         $null = $process.Handle
     }
     if ($ReadyEvent) {
         $ready = [Threading.EventWaitHandle]::OpenExisting($ReadyEvent)
-        try { [void]$ready.Set() } finally { $ready.Dispose() }
+        try {
+            $proceed = [Threading.EventWaitHandle]::OpenExisting($ProceedEvent)
+            try {
+                [void]$ready.Set()
+                if (!$proceed.WaitOne(10000)) { throw 'The update was not started. The installer has been kept.' }
+            } finally { $proceed.Dispose() }
+        } finally { $ready.Dispose() }
     }
     if ($process -and !$process.WaitForExit(120000)) { throw 'OBS did not close within two minutes. The installer has been kept.' }
     if (Get-Process -Name obs64, obs32 -ErrorAction SilentlyContinue) { throw 'Another OBS instance is still running. Close OBS and retry the installer.' }
@@ -42,7 +49,7 @@ function Invoke-VerifiedUpdate {
 
 if ($MyInvocation.InvocationName -ne '.') {
     try {
-        Invoke-VerifiedUpdate -ObsProcessId $ObsProcessId -ObsExecutable $ObsExecutable -Installer $Installer -Digest $Digest -ReadyEvent $ReadyEvent
+        Invoke-VerifiedUpdate -ObsProcessId $ObsProcessId -ObsExecutable $ObsExecutable -Installer $Installer -Digest $Digest -ReadyEvent $ReadyEvent -ProceedEvent $ProceedEvent
     }
     catch {
         $message = $_.Exception.Message

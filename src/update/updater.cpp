@@ -61,6 +61,7 @@ void Updater::check()
     if (busy() || !configured()) return;
     latest = {}; downloaded.clear(); status = "正在向 GitHub 檢查穩定版本…";
     QNetworkRequest request(QUrl("https://api.github.com/repos/" + repository + "/releases/latest"));
+    request.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
     request.setRawHeader("Accept", "application/vnd.github+json"); request.setRawHeader("User-Agent", "Twitch-Category-Assistant"); request.setRawHeader("X-GitHub-Api-Version", "2022-11-28"); request.setTransferTimeout(15000); request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
     reply = network->get(request); auto *active = reply.data(); deadline.start(20000); emit changed();
     connect(active, &QNetworkReply::readyRead, this, [active] { if (active->bytesAvailable() > 2 * 1024 * 1024) active->abort(); });
@@ -93,7 +94,7 @@ void Updater::consume()
 void Updater::fetch(const QUrl &url, int redirects)
 {
     if (!updateDownloadUrl(url) || redirects > 5) { finishDownload("下載重新導向不受信任或次數過多"); return; }
-    QNetworkRequest request(url); request.setRawHeader("User-Agent", "Twitch-Category-Assistant"); request.setTransferTimeout(20000); request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
+    QNetworkRequest request(url); request.setAttribute(QNetworkRequest::Http2AllowedAttribute, false); request.setRawHeader("User-Agent", "Twitch-Category-Assistant"); request.setTransferTimeout(20000); request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
     reply = network->get(request); auto *active = reply.data(); emit changed();
     connect(active, &QNetworkReply::readyRead, this, &Updater::consume);
     connect(active, &QNetworkReply::finished, this, [this, active, redirects] {
@@ -131,15 +132,20 @@ bool Updater::launchInstaller(QString *error)
     const auto eventName = "Local\\TCA-Update-" + QUuid::createUuid().toString(QUuid::WithoutBraces);
     HANDLE ready = CreateEventW(nullptr, TRUE, FALSE, reinterpret_cast<LPCWSTR>(eventName.utf16()));
     if (!ready) { *error = "無法準備更新程序確認；OBS 將保持開啟"; return false; }
+    const auto proceedName = eventName + "-continue";
+    HANDLE proceed = CreateEventW(nullptr, TRUE, FALSE, reinterpret_cast<LPCWSTR>(proceedName.utf16()));
+    if (!proceed) { CloseHandle(ready); *error = "無法準備更新程序確認；OBS 將保持開啟"; return false; }
     QProcess process; process.setProgram(powershell);
     process.setArguments({"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "RemoteSigned", "-File", helper,
         "-ObsProcessId", QString::number(QCoreApplication::applicationPid()), "-ObsExecutable", QCoreApplication::applicationFilePath(),
-        "-Installer", QFileInfo(downloaded).absoluteFilePath(), "-Digest", latest.digest, "-ReadyEvent", eventName});
+        "-Installer", QFileInfo(downloaded).absoluteFilePath(), "-Digest", latest.digest, "-ReadyEvent", eventName, "-ProceedEvent", proceedName});
     process.setWorkingDirectory(QFileInfo(downloaded).absolutePath());
     process.setCreateProcessArgumentsModifier([](QProcess::CreateProcessArguments *args) { args->flags |= CREATE_NO_WINDOW; });
-    if (!process.startDetached()) { CloseHandle(ready); *error = "無法啟動更新安裝程序；請從下載資料夾手動安裝"; return false; }
-    const auto acknowledged = WaitForSingleObject(ready, 10000); CloseHandle(ready);
-    if (acknowledged != WAIT_OBJECT_0) { *error = "安裝助手未能啟動或被 Windows 政策阻擋；OBS 保持開啟，MSI 已保留"; return false; }
+    if (!process.startDetached()) { CloseHandle(ready); CloseHandle(proceed); *error = "無法啟動更新安裝程序；請從下載資料夾手動安裝"; return false; }
+    const auto acknowledged = WaitForSingleObject(ready, 10000);
+    const bool permitted = acknowledged == WAIT_OBJECT_0 && SetEvent(proceed);
+    CloseHandle(ready); CloseHandle(proceed);
+    if (!permitted) { *error = "安裝助手未能啟動或被 Windows 政策阻擋；OBS 保持開啟，MSI 已保留"; return false; }
     error->clear(); return true;
 }
 }
