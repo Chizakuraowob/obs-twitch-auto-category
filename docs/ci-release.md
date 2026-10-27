@@ -19,6 +19,6 @@ Actions 預設只有 contents:read；只有手動草稿 job 有 contents:write�
 
 `scripts/package-sources.ps1` 要求乾淨的 Git 工作目錄，以 `git archive HEAD` 產生確切 commit 來源，不打包 build/cache、私人設定或憑證。QtBase、obs-deps 與 WiX 來源使用固定 SHA-256 檢查，附 Qt SBOM 與 `SOURCE-MANIFEST.txt`。來源版本更新時須同步腳本、授權文件與校驗資料。首次收集會連線 Qt 官方及 GitHub 下載來源；只在作者建置／CI 執行，不影響外掛使用者的網路行為。
 
-Release 的 MSI 名稱與 GitHub API SHA-256 digest 須符合既有更新器需求。作者公開 Release 後才會被 `/releases/latest` 偵測；草稿不對一般使用者提供。更新器仍由使用者關閉 OBS 後手動執行 MSI，不支援執行中替換 DLL。
+Release 的 MSI 名稱與 GitHub API SHA-256 digest 須符合既有更新器需求。作者公開 Release 後才會被 `/releases/latest` 偵測；草稿不對一般使用者提供。0.5.8 起，使用者按下載、驗證並安裝後，外掛確認輸出均已停止並正常關閉 OBS；本機助手等待 OBS 結束、再次核對雜湊，再啟動 MSI 精靈。安裝成功才刪除 MSI，取消或失敗時保留。Windows 安全提示仍適用，不支援執行中替換 DLL；完整實機更新流程仍需驗收。
 
 runner 參考：[GitHub 官方映像](https://github.com/actions/runner-images/blob/main/images/windows/Windows2025-VS2026-Readme.md)。目前未取得正式簽章，建置與草稿發布不代表已相容 Smart App Control。
