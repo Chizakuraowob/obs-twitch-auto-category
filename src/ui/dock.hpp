@@ -19,7 +19,7 @@ namespace tca {
 class Dock : public QWidget {
     Q_OBJECT
 public:
-    explicit Dock(QString settingsDirectory, QWidget *parent = nullptr, QNetworkAccessManager *transport = nullptr);
+    explicit Dock(QString settingsDirectory, QWidget *parent = nullptr, QNetworkAccessManager *transport = nullptr, QNetworkAccessManager *updateTransport = nullptr);
     ~Dock() override;
     void setStreaming(bool active);
     void stop();

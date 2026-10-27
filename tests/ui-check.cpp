@@ -12,6 +12,7 @@
 #include <QLineEdit>
 #include <QLabel>
 #include <QMouseEvent>
+#include <QWheelEvent>
 #include <QDialogButtonBox>
 #include <QEventLoop>
 #include <QComboBox>
@@ -22,6 +23,7 @@
 #include <QFileInfo>
 #include <QMessageBox>
 #include <QTableWidget>
+#include <QHeaderView>
 #include <QScrollArea>
 #include <QScrollBar>
 #include <cstdio>
@@ -77,7 +79,8 @@ protected:
         const auto http2 = request.attribute(QNetworkRequest::Http2AllowedAttribute);
         if (!http2.isValid() || http2.toBool()) unexpected = true;
         const auto path = request.url().path(); QByteArray body; int status = 200, delay = 0;
-        if (path == "/oauth2/device") body = R"({"device_code":"fixture","user_code":"TEST","verification_uri":"https://www.twitch.tv/activate","interval":5,"expires_in":60})";
+        if (request.url().host() == "api.github.com") { status = 404; delay = 250; body = "{}"; }
+        else if (path == "/oauth2/device") body = R"({"device_code":"fixture","user_code":"TEST","verification_uri":"https://www.twitch.tv/activate","interval":5,"expires_in":60})";
         else if (path == "/oauth2/token") body = R"({"access_token":"fixture-access","refresh_token":"fixture-refresh","token_type":"bearer"})";
         else if (path == "/oauth2/validate") body = QJsonDocument(QJsonObject{{"client_id", clientId}, {"user_id", "123"}, {"login", "fixture_streamer"}, {"scopes", QJsonArray{"channel:manage:broadcast"}}, {"expires_in", 3600}}).toJson();
         else if (path == "/helix/channels") { ++reads; delay = 300; status = failRead ? 503 : 200; body = QJsonDocument(QJsonObject{{"data", QJsonArray{QJsonObject{{"broadcaster_id", "123"}, {"game_id", channelId}, {"game_name", channelName}}}}}).toJson(); }
@@ -147,6 +150,7 @@ struct DockTestAccess {
         dock.config.animations = true; return dock.effectiveClientId();
     }
     static void lightTheme(Dock &dock) { dock.config.theme = 1; dock.theme(); }
+    static void darkTheme(Dock &dock) { dock.config.theme = 2; dock.theme(); }
     static void noAnimation(Dock &dock) { dock.config.animations = false; dock.theme(); }
     static bool refreshAnimating(Dock &dock) { return dock.refreshTimer.isActive(); }
     static bool searching(Dock &dock) { return dock.searching; }
@@ -274,6 +278,13 @@ static void typeSeconds(QSpinBox *spin, const QString &text)
         QApplication::sendEvent(edit, &press); QApplication::sendEvent(edit, &release);
     }
 }
+static bool wheelPreservesValue(QSpinBox *spin)
+{
+    const int before = spin->value(); const QPointF local(spin->rect().center()), global(spin->mapToGlobal(spin->rect().center()));
+    QWheelEvent event(local, global, {}, QPoint(0, 120), Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+    QApplication::sendEvent(spin, &event);
+    return spin->value() == before;
+}
 static bool hasDelayHint(QWidget *widget)
 {
     for (auto *text : widget->findChildren<QLabel *>())
@@ -385,7 +396,7 @@ static bool connectedUi(const QString &output)
             button->click();
             auto *feedback = dialog->findChild<QLabel *>("cacheFeedback");
             correct = tca::DockTestAccess::hasCachedGame(failedEdit) && tca::DockTestAccess::savedFavorites(failedEdit) == 1 && accountChanges == 0 &&
-                (reset || (feedback && !feedback->isHidden() && feedback->text().contains("失敗")));
+                (reset || (feedback && !feedback->isHidden() && feedback->text().contains("無法清除")));
             dialog->reject();
         });
         tca::DockTestAccess::settings(failedEdit); UI_CHECK(correct); failedEdit.stop();
@@ -536,6 +547,29 @@ int main(int argc, char **argv)
         tca::DockTestAccess::updateFixture(updateDock, true, "0.6.1"); if (notice->isHidden()) return 109;
         tca::DockTestAccess::updateFixture(updateDock, false, "0.6.1"); if (!notice->isHidden()) return 110;
     }
+    {
+        QTemporaryDir checkTemp; tca::Settings fixture; fixture.favorites = {{"42", "Game"}}; fixture.categoryCache.insert("steam:1", {"42", "Game"});
+        QString error; if (!fixture.save(checkTemp.filePath("settings.json"), &error)) return 117;
+        UiTransport network; tca::Dock checkDock(checkTemp.path(), nullptr, nullptr, &network); checkDock.show();
+        int checkResult = 0;
+        QTimer::singleShot(100, &app, [&] {
+            auto *dialog = qobject_cast<QDialog *>(app.activeModalWidget());
+            auto *scroll = dialog ? dialog->findChild<QScrollArea *>() : nullptr;
+            auto *check = dialog ? dialog->findChild<QPushButton *>("checkUpdates") : nullptr;
+            auto *clear = dialog ? dialog->findChild<QPushButton *>("clearCategoryCache") : nullptr;
+            if (!scroll || !check || !clear) { checkResult = 118; if (dialog) dialog->reject(); return; }
+            check->setFocus(); scroll->verticalScrollBar()->setValue(check->mapTo(scroll->widget(), QPoint{}).y() - 200); app.processEvents();
+            const int initial = scroll->verticalScrollBar()->value(); check->click(); app.processEvents();
+            if (!check->isEnabled() || scroll->verticalScrollBar()->value() != initial) checkResult = 119;
+            { QEventLoop wait; QTimer::singleShot(400, &wait, &QEventLoop::quit); wait.exec(); }
+            if (scroll->verticalScrollBar()->value() != initial || network.unexpected) checkResult = 120;
+            clear->click(); auto *feedback = dialog->findChild<QLabel *>("cacheFeedback");
+            const auto saved = tca::Settings::load(checkTemp.filePath("settings.json"), &error);
+            if (!feedback || feedback->isHidden() || !feedback->text().contains("收藏") || !saved.categoryCache.isEmpty() || saved.favorites.size() != 1 || !clear->graphicsEffect()) checkResult = 121;
+            dialog->reject();
+        });
+        tca::DockTestAccess::settings(checkDock); if (checkResult) return checkResult;
+    }
     tca::Settings settings;
     settings.theme = 2; settings.wizardDone = true;
     settings.favorites = {{"509658", "Just Chatting"}, {"42", "測試遊戲"}};
@@ -594,10 +628,11 @@ int main(int argc, char **argv)
                 auto *lookup = dialog->findChild<QCheckBox *>("allowCategoryLookup");
                 if (!lookup || lookup->isChecked()) result = 84; else lookup->setChecked(true);
                 if (!size) result = 13;
-                else size->setValue(18);
+                else { size->setValue(18); if (!wheelPreservesValue(size)) result = 113; }
                 auto *delay = dialog->findChild<QSpinBox *>("chattingDelay");
                 if (!delay || delay->minimum() != 15 || delay->maximum() != 600) result = 41;
                 else {
+                    if (!wheelPreservesValue(delay)) result = 114;
                     if (!hasDelayHint(dialog)) result = 48;
                     for (const auto &input : {QString("15"), QString("600"), QString("120")}) {
                         typeSeconds(delay, input);
@@ -629,6 +664,7 @@ int main(int argc, char **argv)
             auto *quiet = wizard->findChild<QCheckBox *>("quietMode"); if (!quiet || !quiet->isChecked()) result = 83;
             auto *lookup = wizard->findChild<QCheckBox *>("allowCategoryLookup"); if (!lookup || !lookup->isChecked()) result = 86;
             auto *delay = wizard->findChild<QSpinBox *>("chattingDelay"); if (!delay || delay->value() != 45) result = 43;
+            if (delay && !wheelPreservesValue(delay)) result = 115;
             if (!hasDelayHint(wizard)) result = 50;
             if (delay) { typeSeconds(delay, "120"); if (delay->value() != 120) result = 51; }
             wizard->next(); wizard->next(); app.processEvents();
@@ -712,6 +748,7 @@ int main(int argc, char **argv)
         QTimer::singleShot(100, &app, [&] {
             auto *dialog = qobject_cast<QDialog *>(app.activeModalWidget()); auto *table = dialog ? dialog->findChild<QTableWidget *>("myGamesTable") : nullptr;
             if (!table || table->rowCount() != 3) { result = 44; if (dialog) dialog->reject(); return; }
+            if (!table->verticalHeader()->isHidden() || table->showGrid()) result = 116;
             auto *forget = dialog->findChild<QPushButton *>("forgetGame");
             if (!forget || forget->isEnabled()) result = 93;
             table->setCurrentCell(1, 0);
@@ -721,6 +758,14 @@ int main(int argc, char **argv)
             if (!dialog->grab().save(output + "/my-games.png")) result = 46; dialog->reject();
         });
         if (!tca::DockTestAccess::games(light)) result = 47;
+        tca::DockTestAccess::darkTheme(light);
+        QTimer::singleShot(100, &app, [&] {
+            auto *dialog = qobject_cast<QDialog *>(app.activeModalWidget()); auto *table = dialog ? dialog->findChild<QTableWidget *>("myGamesTable") : nullptr;
+            if (!table || table->rowCount() == 0) result = 122;
+            else { table->setCurrentCell(0, 0); settle(); if (!dialog->grab().save(output + "/my-games-dark.png")) result = 123; }
+            if (dialog) dialog->reject();
+        });
+        tca::DockTestAccess::games(light); tca::DockTestAccess::lightTheme(light);
         if (!tca::DockTestAccess::decisionRemembered(light, true) || !tca::DockTestAccess::decisionRemembered(light, false)) result = 40;
         for (int action = 0; action < 3; ++action)
             if (!tca::DockTestAccess::idleDecisionRemembered(light, action, output + "/chatting-suggestion.png")) result = 74 + action;
