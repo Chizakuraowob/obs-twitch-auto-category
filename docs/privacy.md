@@ -36,7 +36,7 @@ OAuth、Token 驗證／刷新／撤銷會連線 `id.twitch.tv`，授權網頁由
 
 自動檢查預設關閉，開啟後在啟動時檢查一次；手動檢查也會連線。請求前往 `api.github.com`，更新下載可經 `github.com`、`release-assets.githubusercontent.com` 或 `objects.githubusercontent.com`。GitHub 可取得 IP、User-Agent 及請求資訊；外掛不向 GitHub 傳送 Twitch Token、Client ID、遊戲、程序或視窗資料。
 
-只有你按下「下載、驗證並安裝更新」才取得 MSI；外掛核對 API 提供的 SHA-256，確認未直播／錄影等輸出後正常關閉 OBS，本機助手等候 OBS 退出、再次核對雜湊，再啟動安裝精靈。安裝成功才清除此次 MSI，Windows 權限與安全限制仍適用。更新說明以 Markdown 預覽，不載入圖片或外部資源；HTTPS 連結須自行點擊才開啟瀏覽器。Windows 簽章驗證只用本機快取，不為此額外查詢撤銷服務。GitHub 的資料處理依 [GitHub 隱私聲明](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement)。瀏覽器開啟專案、聯絡或授權連結時，相關網站也會收到一般瀏覽請求。
+只有你確認下載更新後才取得 MSI；外掛核對 API 提供的 SHA-256，並再次詢問是否安裝。確認後檢查未直播／錄影等輸出，正常關閉 OBS，本機助手等候 OBS 退出、再次核對雜湊，再啟動安裝精靈。安裝成功才清除此次 MSI，Windows 權限與安全限制仍適用。更新說明以 Markdown 預覽，不載入圖片或外部資源；HTTPS 連結須自行點擊才開啟瀏覽器。Windows 簽章驗證只用本機快取，不為此額外查詢撤銷服務。GitHub 的資料處理依 [GitHub 隱私聲明](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement)。瀏覽器開啟專案、聯絡或授權連結時，相關網站也會收到一般瀏覽請求。
 
 ## 控制、刪除與聯絡
 

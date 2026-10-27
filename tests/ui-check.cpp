@@ -90,6 +90,12 @@ protected:
 
 namespace tca {
 struct DockTestAccess {
+    static void updateFixture(Dock &dock, bool enabled, const QString &version) {
+        dock.config.checkUpdates = enabled; dock.updater.latest.version = version; dock.updater.status = "有新版本：" + version;
+        dock.updater.latest.publishedAt = QDateTime::fromString("2026-10-20T12:34:56Z", Qt::ISODate);
+        emit dock.updater.changed();
+    }
+    static void updateVerified(Dock &dock) { emit dock.updater.downloadVerified(); }
     static bool staleSuggestion(Dock &dock) {
         dock.config.developerMode = true; dock.config.autoDetect = true; dock.config.paused = false;
         const Candidate game{"stale.exe", "42", "Game", 0}; dock.detected = {game}; dock.notifySuggestion(game);
@@ -494,6 +500,42 @@ int main(int argc, char **argv)
     auto settle = [&] { QEventLoop loop; QTimer::singleShot(180, &loop, &QEventLoop::quit); loop.exec(); };
     QTemporaryDir temp;
     if (!temp.isValid()) return 1;
+    {
+        QTemporaryDir updateTemp; tca::Dock updateDock(updateTemp.path()); updateDock.resize(380, 900); updateDock.show(); app.processEvents();
+        auto *notice = updateDock.findChild<QWidget *>("updateNotice"); auto *updateButton = updateDock.findChild<QPushButton *>("updateNow");
+        if (!notice || !updateButton || !notice->isHidden()) return 104;
+        tca::DockTestAccess::updateFixture(updateDock, false, "0.6.0"); if (!notice->isHidden()) return 105;
+        tca::DockTestAccess::updateFixture(updateDock, true, "0.6.0"); if (notice->isHidden()) return 106;
+        settle();
+        if (!updateDock.grab().save(QDir(QCoreApplication::applicationDirPath()).filePath("update-notice-check.png"))) return 111;
+        bool confirmation = false;
+        QTimer::singleShot(0, &app, [&] {
+            auto *prompt = qobject_cast<QMessageBox *>(app.activeModalWidget());
+            confirmation = prompt && prompt->text().contains("0.6.0") && prompt->text().contains("發布時間") && prompt->text().contains("OBS") && prompt->defaultButton() == prompt->button(QMessageBox::No);
+            if (prompt) prompt->button(QMessageBox::No)->click();
+        });
+        updateButton->click(); if (!confirmation) return 107;
+        int installRequests = 0; QObject::connect(&updateDock, &tca::Dock::installUpdateRequested, [&] { ++installRequests; });
+        bool finalConfirmation = false;
+        tca::DockTestAccess::updateVerified(updateDock);
+        QTimer::singleShot(0, &app, [&] {
+            auto *prompt = qobject_cast<QMessageBox *>(app.activeModalWidget());
+            finalConfirmation = prompt && prompt->text().contains("停止直播") && prompt->defaultButton() == prompt->button(QMessageBox::No);
+            if (prompt) prompt->button(QMessageBox::No)->click();
+        });
+        { QEventLoop loop; QTimer::singleShot(100, &loop, &QEventLoop::quit); loop.exec(); }
+        if (!finalConfirmation || installRequests != 0) return 112;
+        bool skipped = false;
+        QTimer::singleShot(0, &app, [&] {
+            auto *dialog = qobject_cast<QDialog *>(app.activeModalWidget());
+            auto *skip = dialog ? dialog->findChild<QPushButton *>("skipUpdate") : nullptr;
+            if (skip && skip->isEnabled()) { skip->click(); skipped = notice->isHidden(); }
+            if (dialog) dialog->reject();
+        });
+        tca::DockTestAccess::settings(updateDock); if (!skipped) return 108;
+        tca::DockTestAccess::updateFixture(updateDock, true, "0.6.1"); if (notice->isHidden()) return 109;
+        tca::DockTestAccess::updateFixture(updateDock, false, "0.6.1"); if (!notice->isHidden()) return 110;
+    }
     tca::Settings settings;
     settings.theme = 2; settings.wizardDone = true;
     settings.favorites = {{"509658", "Just Chatting"}, {"42", "測試遊戲"}};

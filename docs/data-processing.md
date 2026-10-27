@@ -45,7 +45,7 @@
 - 不提供 GitHub 登入、不傳送 Twitch Token、Client ID、程序或遊戲資料。GitHub 可取得 IP、User-Agent 與一般請求資訊；版本比較在本機完成。
 - 只有使用者按下載才取得 MSI。初始網址必須符合指定儲存庫的 Release 資產路徑；HTTPS 重新導向限 `github.com`、`release-assets.githubusercontent.com`、`objects.githubusercontent.com`，最多 5 次，總下載期限 120 秒、上限 100 MB。
 - 核對 GitHub API 資產的 SHA-256 與大小；不完整或不符的下載不保留。雜湊由同一 GitHub 來源提供，不是獨立的作者身分保證。
-- Windows 簽章檢查僅使用本機快取，不為此查詢外部撤銷服務，也未配置作者簽章身分釘選。按下「下載、驗證並安裝更新」即啟動接續安裝；未簽章不會繞過 Windows 安全限制。
+- Windows 簽章檢查僅使用本機快取，不為此查詢外部撤銷服務，也未配置作者簽章身分釘選。下載前及驗證完成後分別要求確認，第二次確認才啟動接續安裝；未簽章不會繞過 Windows 安全限制。
 - 更新說明以 Markdown 顯示，停用 HTML 與圖片／外部資源載入；只有點擊 HTTPS 連結才交由預設瀏覽器開啟。
 - API 回應、更新說明與下載進度只留記憶體；更新開關、略過版本和完成的 MSI 會保存於本機。
 

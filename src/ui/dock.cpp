@@ -102,12 +102,13 @@ static QString themeSheet(const Settings &config)
     const QString edge = dark ? "#34373D" : "#E3E5E9", text = dark ? "#F3F4F6" : "#202329";
     QString family = config.fontFamily; family.remove('\\'); family.remove('\''); family.remove('\n'); family.remove('\r');
     return QString("QWidget {color:%1;background:%2; font-family:'%6';font-size:%5px;}"
-        "QWidget#tcaRoot,QDialog {background:%2;} QWidget#tcaRoot {border:0;border-radius:0;}"
+        "QWidget#tcaRoot,QDialog {background:%2;} QWidget#tcaRoot {border:0;border-radius:0;} QWidget#updateNotice {background:transparent;}"
         "QScrollArea,QScrollArea > QWidget {border:0;background:%2;border-radius:0;}"
         "QFrame[card=true] {background:%3;border:1px solid %4;border-radius:12px;}"
         "QLabel {background:transparent;} QLabel[role=heading] {font-weight:600;} QLabel[role=muted] {color:%8;}"
         "QLabel[role=title] {font-weight:700;font-size:%7px;} QLabel[badge=true] {color:#8B7CF6;}"
         "QLabel[indicator=true] {border:0;border-radius:5px;background:#B07A10;}"
+        "QLabel#updateIndicator {background:#E5B921;}"
         "QLabel[indicator=true][state=success] {background:#1D965F;} QLabel[indicator=true][state=error] {background:#D44D5C;}"
         "QPushButton,QComboBox,QLineEdit,QSpinBox {background:%3;border:1px solid %4;border-radius:8px;padding:7px;}"
         "QPushButton:hover {border-color:#8B7CF6;} QPushButton:focus,QLineEdit:focus,QComboBox:focus {border-color:#8B7CF6;}"
@@ -169,6 +170,17 @@ Dock::Dock(QString settingsDirectory, QWidget *parent, QNetworkAccessManager *tr
     auto *statusCard = card(layout, "狀態"); statusCard->parentWidget()->setObjectName("statusCard");
     auto *statusRow = new QHBoxLayout; statusIndicator = indicatorLight("statusIndicator"); statusLabel = label("連接 Twitch，開始管理分類"); statusLabel->setObjectName("operationStatus"); statusLabel->setAccessibleName("分類更新狀態");
     statusRow->addWidget(statusIndicator); statusRow->addWidget(statusLabel, 1); statusCard->addLayout(statusRow);
+    updateNotice = new QWidget; updateNotice->setObjectName("updateNotice");
+    auto *updateLayout = new QVBoxLayout(updateNotice); updateLayout->setContentsMargins(0, 4, 0, 0); updateLayout->setSpacing(6);
+    auto *updateRow = new QHBoxLayout; auto *updateLight = indicatorLight("updateIndicator"); indicator(updateLight, "notice", "有新版本");
+    auto *pulseEffect = new QGraphicsOpacityEffect(updateLight); updateLight->setGraphicsEffect(pulseEffect);
+    updatePulse = new QPropertyAnimation(pulseEffect, "opacity", this); updatePulse->setDuration(1600); updatePulse->setLoopCount(-1); updatePulse->setStartValue(1.0); updatePulse->setKeyValueAt(0.5, 0.45); updatePulse->setEndValue(1.0); updatePulse->setEasingCurve(QEasingCurve::InOutSine);
+    updateNoticeText = label({}); updateNoticeText->setObjectName("updateNoticeText"); updateRow->addWidget(updateLight); updateRow->addWidget(updateNoticeText, 1); updateLayout->addLayout(updateRow);
+    updateNow = button("查看並更新"); updateNow->setObjectName("updateNow"); updateNow->setProperty("primary", true); updateLayout->addWidget(updateNow);
+    updateCancel = button("取消下載"); updateCancel->setObjectName("cancelUpdate"); updateLayout->addWidget(updateCancel);
+    statusCard->addWidget(updateNotice); updateNotice->hide();
+    connect(updateNow, &QPushButton::clicked, this, [this] { beginUpdate(this); });
+    connect(updateCancel, &QPushButton::clicked, &updater, &Updater::cancel);
     indicator(statusIndicator, "notice", "等待連接 Twitch");
     statusResetTimer.setSingleShot(true); statusResetTimer.setInterval(8000);
     connect(&statusResetTimer, &QTimer::timeout, this, &Dock::restoreStatus);
@@ -328,11 +340,48 @@ Dock::Dock(QString settingsDirectory, QWidget *parent, QNetworkAccessManager *tr
     connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged, this, [this] { if (config.theme == 0) theme(); });
     theme(); refreshFavorites(); updateAccount();
     if (!error.isEmpty()) addActivity(error);
-    connect(&updater, &Updater::changed, this, [this] { if (!stopped && !updater.busy() && !updater.latest.version.isEmpty() && updater.latest.version != config.skippedUpdate) setStatus("有新版本 " + updater.latest.version + "，請至設定 → 版本與更新。"); });
+    connect(&updater, &Updater::changed, this, &Dock::refreshUpdateNotice);
+    connect(&updater, &Updater::progress, this, [this](qint64 received, qint64 total) { updateNoticeText->setText(QString("下載更新：%1 / %2 KB").arg(received / 1024).arg(total / 1024)); });
+    connect(&updater, &Updater::downloadVerified, this, [this] {
+        QTimer::singleShot(0, this, [this] {
+            if (stopped) return;
+            QMessageBox prompt(QMessageBox::Question, "準備安裝更新", updater.status + "\n\n請確認工作已儲存，並已停止直播、錄影、重播緩衝及虛擬攝影機。繼續後 OBS 將關閉並開啟 MSI 安裝精靈。", QMessageBox::Yes | QMessageBox::No, this);
+            prompt.setTextFormat(Qt::PlainText); prompt.setDefaultButton(QMessageBox::No);
+            prompt.button(QMessageBox::Yes)->setText("關閉 OBS 並安裝"); prompt.button(QMessageBox::No)->setText("稍後安裝");
+            QTimer::singleShot(0, &prompt, [this, &prompt] { animate(&prompt); });
+            if (prompt.exec() == QMessageBox::Yes) emit installUpdateRequested();
+        });
+    });
     QTimer::singleShot(10000, this, [this] { if (!stopped && config.checkUpdates && config.consented()) updater.check(); });
     if (!settingsReadError && config.consented()) client.restore(effectiveClientId());
 }
 QString Dock::effectiveClientId() const { return *PublisherClientId ? QString::fromLatin1(PublisherClientId) : config.clientId; }
+void Dock::refreshUpdateNotice()
+{
+    const bool visible = !stopped && config.checkUpdates && !updater.latest.version.isEmpty() && updater.latest.version != config.skippedUpdate;
+    const bool newlyVisible = visible && updateNotice->isHidden();
+    updateNotice->setVisible(visible);
+    if (visible && config.animations && QApplication::style()->styleHint(QStyle::SH_Widget_Animate)) { if (updatePulse->state() != QAbstractAnimation::Running) updatePulse->start(); }
+    else { updatePulse->stop(); qobject_cast<QGraphicsOpacityEffect *>(updatePulse->targetObject())->setOpacity(1.0); }
+    if (!visible) return;
+    const auto details = !updater.busy() && !updater.status.isEmpty() && !updater.status.startsWith("有新版本") ? "\n" + updater.status : QString();
+    updateNoticeText->setText("有新版本：" + updater.latest.version + details);
+    updateNow->setVisible(!updater.busy()); updateCancel->setVisible(updater.busy());
+    if (newlyVisible) animate(updateNotice);
+}
+void Dock::beginUpdate(QWidget *parent)
+{
+    if (updater.busy() || updater.latest.version.isEmpty()) return;
+    const auto version = updater.latest.version;
+    const auto date = updater.latest.publishedAt.isValid() ? updater.latest.publishedAt.toLocalTime().toString("yyyy-MM-dd HH:mm") : QStringLiteral("未提供");
+    QMessageBox prompt(QMessageBox::Question, "確認更新 Twitch 分類助手",
+        QString("目前版本：%1\n更新版本：%2\n發布時間：%3\n\n將從 GitHub 下載並驗證安裝檔。下載完成後會再次詢問，確認後才關閉 OBS 並開啟 MSI 安裝精靈。請先儲存工作，並停止直播、錄影、重播緩衝及虛擬攝影機。").arg(PluginVersion, updater.latest.version, date),
+        QMessageBox::Yes | QMessageBox::No, parent);
+    prompt.setTextFormat(Qt::PlainText); prompt.setDefaultButton(QMessageBox::No);
+    prompt.button(QMessageBox::Yes)->setText("下載並驗證"); prompt.button(QMessageBox::No)->setText("取消");
+    QTimer::singleShot(0, &prompt, [this, &prompt] { animate(&prompt); });
+    if (prompt.exec() == QMessageBox::Yes && updater.latest.version == version && !updater.busy()) updater.download(QDir(directory).filePath("updates"));
+}
 void Dock::beginFirstRun()
 {
     if (stopped) return;
@@ -998,23 +1047,23 @@ void Dock::settingsDialog()
     auto *live = new QCheckBox("僅在本機 OBS 串流期間顯示自動建議"); live->setChecked(config.liveOnly); notify->addWidget(live);
     auto *updates = card(layout, "版本與更新"); updates->addWidget(label("目前版本：" + QString::fromLatin1(PluginVersion) + "\nGitHub：" + QString::fromLatin1(UpdateRepository)));
     auto *updateStatus = label(updater.status); updateStatus->setObjectName("updateStatus"); updates->addWidget(updateStatus);
-    auto *autoCheck = new QCheckBox("啟動後自動檢查 GitHub 更新（預設關閉）"); autoCheck->setChecked(config.checkUpdates); autoCheck->setEnabled(updater.configured()); updates->addWidget(autoCheck);
+    auto *autoCheck = new QCheckBox("啟動後自動檢查 GitHub 更新（預設關閉）"); autoCheck->setObjectName("autoCheckUpdates"); autoCheck->setChecked(config.checkUpdates); autoCheck->setEnabled(updater.configured()); updates->addWidget(autoCheck);
     updates->addWidget(label("檢查與下載會連線 GitHub，不傳送 Twitch Token 或遊戲資料。下載並驗證後會關閉 OBS 並開啟安裝精靈，請先儲存工作並停止直播／錄影。安裝成功後自動刪除 MSI；失敗或取消則保留。Windows 權限與安全提示仍需自行確認。"));
     auto *check = button("立即檢查更新"); check->setObjectName("checkUpdates"); updates->addWidget(check);
     auto *notes = new QTextBrowser; notes->setDocument(new ReleaseNotesDocument(notes)); notes->setObjectName("releaseNotes"); notes->setMaximumHeight(220); notes->setOpenLinks(false); notes->setOpenExternalLinks(false); updates->addWidget(notes);
     connect(notes, &QTextBrowser::anchorClicked, notes, [](const QUrl &url) { if (url.scheme() == "https" && url.userInfo().isEmpty()) QDesktopServices::openUrl(url); });
     auto *download = button("下載、驗證並安裝更新"); download->setProperty("secondary", true); updates->addWidget(download);
     auto *cancelDownload = button("取消下載／檢查"); updates->addWidget(cancelDownload);
-    auto *skip = button("略過此版本"); updates->addWidget(skip);
+    auto *skip = button("略過此版本"); skip->setObjectName("skipUpdate"); updates->addWidget(skip);
     auto *folder = button("開啟已下載更新資料夾"); updates->addWidget(folder);
     auto refreshUpdate = [=] { updateStatus->setText(updater.status + (updater.latest.version == config.skippedUpdate && !config.skippedUpdate.isEmpty() ? "（已略過自動提醒）" : "")); notes->document()->setMarkdown(updater.latest.notes, QTextDocument::MarkdownFeatures(QTextDocument::MarkdownDialectGitHub) | QTextDocument::MarkdownNoHTML); notes->setVisible(!updater.latest.notes.isEmpty()); check->setEnabled(updater.configured() && !updater.busy()); download->setEnabled(!updater.latest.version.isEmpty() && !updater.busy()); cancelDownload->setEnabled(updater.busy()); skip->setEnabled(!updater.latest.version.isEmpty() && !updater.busy()); folder->setEnabled(!updater.downloaded.isEmpty()); };
     connect(&updater, &Updater::changed, &dialog, refreshUpdate); refreshUpdate();
     connect(&updater, &Updater::progress, &dialog, [=](qint64 received, qint64 total) { updateStatus->setText(QString("下載中：%1 / %2 KB").arg(received / 1024).arg(total / 1024)); });
     connect(check, &QPushButton::clicked, &updater, &Updater::check);
-    connect(download, &QPushButton::clicked, &dialog, [this] { updater.download(QDir(directory).filePath("updates")); });
-    connect(&updater, &Updater::downloadVerified, &dialog, [&, this] { dialog.accept(); emit installUpdateRequested(); });
+    connect(download, &QPushButton::clicked, &dialog, [this, &dialog] { beginUpdate(&dialog); });
+    connect(&updater, &Updater::downloadVerified, &dialog, &QDialog::accept);
     connect(cancelDownload, &QPushButton::clicked, &updater, &Updater::cancel);
-    connect(skip, &QPushButton::clicked, &dialog, [&, this] { const auto old = config.skippedUpdate; config.skippedUpdate = updater.latest.version; if (!save()) config.skippedUpdate = old; refreshUpdate(); });
+    connect(skip, &QPushButton::clicked, &dialog, [&, this] { const auto old = config.skippedUpdate; config.skippedUpdate = updater.latest.version; if (!save()) config.skippedUpdate = old; refreshUpdate(); refreshUpdateNotice(); });
     connect(folder, &QPushButton::clicked, &dialog, [this] { if (!updater.downloaded.isEmpty()) QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(updater.downloaded).absolutePath())); });
     auto *advanced = card(layout, "進階選項"); auto *pause = new QCheckBox("暫停自動分類建議"); pause->setChecked(config.paused); advanced->addWidget(pause);
     auto *developerMode = new QCheckBox("開發者模式：不開台測試分類建議"); developerMode->setObjectName("developerMode"); developerMode->setChecked(config.developerMode); advanced->addWidget(developerMode);
@@ -1033,7 +1082,7 @@ void Dock::settingsDialog()
         const auto previous = config; config = {};
         if (!save()) { config = previous; QMessageBox::warning(&dialog, "清除失敗", "無法保存清除結果，原有設定與帳號保持不變。"); return; }
         client.logout(); suggestionSession = {}; ignored.clear(); lookupAttempted.clear(); detected.clear(); manualOverride = false; stableKey.clear(); autoAttemptKey.clear();
-        pendingWindow = {}; observedWindows.clear(); reviewUnknownButton->setEnabled(true); activityList->clear(); artCache.clear(); theme(); refreshFavorites(); updateAccount(); dialog.reject();
+        pendingWindow = {}; observedWindows.clear(); reviewUnknownButton->setEnabled(true); activityList->clear(); artCache.clear(); theme(); refreshFavorites(); updateAccount(); refreshUpdateNotice(); dialog.reject();
     });
     auto *info = card(layout, "關於與法律資訊");
     auto *aboutButton = button("關於、貢獻者與開源授權"); aboutButton->setObjectName("openAbout"); info->addWidget(aboutButton);
@@ -1066,7 +1115,7 @@ void Dock::settingsDialog()
         if (!save()) { config = previous; QMessageBox::warning(&dialog, "未儲存", "無法儲存設定，原有檔案未被取代。請檢查設定目錄或還原備份。"); return; }
         if (newId != previous.clientId) client.logout();
         lookupAttempted.clear(); stableKey.clear(); notificationKey.clear(); if (suggestionPrompt) suggestionPrompt->close();
-        suggestionSession.pause(); autoAttemptKey.clear(); lastAuto = 0; theme(); updateAccount(); scan(); dialog.accept();
+        suggestionSession.pause(); autoAttemptKey.clear(); lastAuto = 0; theme(); updateAccount(); refreshUpdateNotice(); scan(); dialog.accept();
     });
     dialog.exec();
     if (openWizard) wizard();

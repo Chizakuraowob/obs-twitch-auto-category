@@ -5,9 +5,10 @@
 #include <QSaveFile>
 #include <QCryptographicHash>
 #include <QTimer>
+#include <QDateTime>
 #include <memory>
 namespace tca {
-struct Release { QString version, notes, filename, digest; QUrl page, download; qint64 size = 0; };
+struct Release { QString version, notes, filename, digest; QUrl page, download; qint64 size = 0; QDateTime publishedAt; };
 bool validUpdateRepository(const QString &repository);
 bool parseRelease(const QByteArray &data, const QString &repository, const QString &current, Release *release, QString *error);
 bool updateDownloadUrl(const QUrl &url);

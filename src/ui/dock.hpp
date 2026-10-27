@@ -14,6 +14,7 @@ class QPushButton;
 class QLineEdit;
 class QListWidget;
 class QComboBox;
+class QPropertyAnimation;
 namespace tca {
 class Dock : public QWidget {
     Q_OBJECT
@@ -58,6 +59,8 @@ private:
 
     void setStatus(const QString &message, Client::StatusLevel level = Client::StatusLevel::Notice, bool temporary = true);
     void restoreStatus();
+    void refreshUpdateNotice();
+    void beginUpdate(QWidget *parent);
     void animate(QWidget *widget);
     QString effectiveClientId() const;
     QString directory, settingsPath;
@@ -72,6 +75,10 @@ private:
     int refreshAngle = 0;
     QLabel *accountIndicator, *statusIndicator;
     QPushButton *refreshButton;
+    QWidget *updateNotice;
+    QLabel *updateNoticeText;
+    QPushButton *updateNow, *updateCancel;
+    QPropertyAnimation *updatePulse;
     QLabel *accountLabel, *currentLabel, *currentArt, *syncLabel, *statusLabel, *suggestionLabel, *searchHint;
     QLineEdit *searchInput;
     QListWidget *searchList, *activityList;

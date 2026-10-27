@@ -39,7 +39,7 @@ bool parseRelease(const QByteArray &data, const QString &repository, const QStri
         const auto digest = asset["digest"].toString(); const auto size = asset["size"].toDouble(); const QUrl url(asset["browser_download_url"].toString());
         if (!QRegularExpression("^sha256:[0-9a-fA-F]{64}$").match(digest).hasMatch() || size < 64 || size > 100 * 1024 * 1024 || size != static_cast<qint64>(size) || !secureUrl(url) || url.host() != "github.com" || !url.query().isEmpty() || url.path() != "/" + repository + "/releases/download/" + tag + "/" + filename) return false;
         if (!release->version.isEmpty()) return false;
-        *release = {version, o["body"].toString().left(16000), filename, digest.mid(7).toLower(), QUrl("https://github.com/" + repository + "/releases/tag/" + tag), url, static_cast<qint64>(size)};
+        *release = {version, o["body"].toString().left(16000), filename, digest.mid(7).toLower(), QUrl("https://github.com/" + repository + "/releases/tag/" + tag), url, static_cast<qint64>(size), QDateTime::fromString(o["published_at"].toString(), Qt::ISODate)};
     }
     if (release->version.isEmpty()) return false;
     error->clear(); return true;
@@ -114,7 +114,7 @@ void Updater::finishDownload(const QString &error)
         WINTRUST_FILE_INFO file{}; file.cbStruct = sizeof(file); file.pcwszFilePath = reinterpret_cast<LPCWSTR>(downloaded.utf16());
         WINTRUST_DATA trust{}; trust.cbStruct = sizeof(trust); trust.dwUIChoice = WTD_UI_NONE; trust.dwUnionChoice = WTD_CHOICE_FILE; trust.pFile = &file; trust.dwStateAction = WTD_STATEACTION_VERIFY; trust.dwProvFlags = WTD_CACHE_ONLY_URL_RETRIEVAL;
         GUID action = WINTRUST_ACTION_GENERIC_VERIFY_V2; const LONG result = WinVerifyTrust(nullptr, &action, &trust); trust.dwStateAction = WTD_STATEACTION_CLOSE; WinVerifyTrust(nullptr, &action, &trust);
-        status = "SHA-256 已核對。" + QString(result == ERROR_SUCCESS ? "Windows 簽章有效。" : "簽章未通過本機驗證，Windows 仍可能阻擋安裝。") + "正在準備關閉 OBS 並安裝更新…";
+        status = "SHA-256 已核對。" + QString(result == ERROR_SUCCESS ? "Windows 簽章有效。" : "簽章未通過本機驗證，Windows 仍可能阻擋安裝。") + "等待確認安裝。";
     }
     emit changed();
     if (error.isEmpty()) emit downloadVerified();

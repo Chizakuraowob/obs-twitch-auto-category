@@ -108,9 +108,10 @@ int main(int argc, char **argv)
         const QString repo = "Chizakuraowob/obs-twitch-auto-category";
         const QByteArray payload(128, 'x'); const auto digest = QString::fromLatin1(QCryptographicHash::hash(payload, QCryptographicHash::Sha256).toHex());
         QJsonObject asset{{"name", "twitch-category-assistant-0.6.0-windows-x64.msi"}, {"digest", "sha256:" + digest}, {"size", payload.size()}, {"browser_download_url", "https://github.com/" + repo + "/releases/download/v0.6.0/twitch-category-assistant-0.6.0-windows-x64.msi"}};
-        QJsonObject release{{"draft", false}, {"prerelease", false}, {"tag_name", "v0.6.0"}, {"body", "Notes"}, {"assets", QJsonArray{asset}}};
+        QJsonObject release{{"draft", false}, {"prerelease", false}, {"tag_name", "v0.6.0"}, {"body", "Notes"}, {"published_at", "2026-10-20T12:34:56Z"}, {"assets", QJsonArray{asset}}};
         const auto encode = [&] { return QJsonDocument(release).toJson(); }; Release result; QString error;
-        CHECK(parseRelease(encode(), repo, "0.5.0", &result, &error)); CHECK(result.version == "0.6.0");
+        CHECK(parseRelease(encode(), repo, "0.5.0", &result, &error)); CHECK(result.version == "0.6.0"); CHECK(result.publishedAt == QDateTime::fromString("2026-10-20T12:34:56Z", Qt::ISODate));
+        release["published_at"] = "invalid"; CHECK(parseRelease(encode(), repo, "0.5.0", &result, &error)); CHECK(!result.publishedAt.isValid());
         CHECK(parseRelease(encode(), repo, "0.6.0", &result, &error)); CHECK(result.version.isEmpty());
         CHECK(!validUpdateRepository("obsproject/obs-plugintemplate")); CHECK(!updateDownloadUrl(QUrl("http://github.com/file"))); CHECK(!updateDownloadUrl(QUrl("https://github.com.attacker.invalid/a")));
         CHECK(!updateDownloadUrl(QUrl("https://user@github.com/a")));

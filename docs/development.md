@@ -103,7 +103,7 @@ OBS 32.2.2 使用的 Qt 6.11.1 仍有上游安全問題。外掛的 Twitch、Git
 
 更新來源由 CMake `TCA_UPDATE_REPOSITORY` 固定為 `Chizakuraowob/obs-twitch-auto-category`；衍生專案應改成自己的儲存庫，留空可停用。檢查 `/releases/latest`，只接受 `vX.Y.Z` 或 `X.Y.Z` 的穩定版。Release 請附上 `twitch-category-assistant-X.Y.Z-windows-x64.msi`；GitHub API 必須提供該資產的 SHA-256 digest 與大小，否則拒絕內建下載。打包腳本亦產生 `.sha256` 供人工核對。
 
-0.5.8 起，使用者按下載、驗證並安裝後，外掛核對雜湊及本機 Windows 簽章狀態，確認 OBS 輸出已停止並正常關閉 OBS；本機助手等待退出、重新核對雜湊，再開啟 MSI 安裝精靈。成功才刪除 MSI，取消或失敗時保留。尚未配置作者身分釘選；同一 GitHub 來源提供的雜湊不等同作者身分保證，Windows 的權限與安全限制仍適用。發布前仍需測試簽章、升級與實際安裝；一般 CI 不會建立 Release，草稿需由維護者手動選擇版本 tag 啟動。
+使用者先確認版本資訊後下載，外掛核對雜湊及本機 Windows 簽章狀態，接著再次要求確認；確認後檢查 OBS 輸出已停止並正常關閉 OBS。本機助手等待退出、重新核對雜湊，再開啟 MSI 安裝精靈。成功才刪除 MSI，取消或失敗時保留。尚未配置作者身分釘選；同一 GitHub 來源提供的雜湊不等同作者身分保證，Windows 的權限與安全限制仍適用。發布前仍需測試簽章、升級與實際安裝；一般 CI 不會建立 Release，草稿需由維護者手動選擇版本 tag 啟動。
 
 MSI 原生檢查工具不依賴 Qt，不發送關閉訊息或終止程序。`tca-installer-test.exe MSI_PATH CHECK_DLL_PATH FIXTURE_EXE_PATH` 在真實 MSI session 中直接呼叫程序檢查函式，測試靜默阻擋、取消、重試，不執行檔案安裝。假 OBS fixture 只等待本測試的結束事件，不是實際 OBS。
 
