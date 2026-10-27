@@ -1,7 +1,7 @@
 #include "dock.hpp"
+#include "category-art.hpp"
 #include "release-config.hpp"
 #include <QApplication>
-#include <QBuffer>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDateTime>
@@ -26,7 +26,6 @@
 #include <QFileDialog>
 #include <QSaveFile>
 #include <QJsonDocument>
-#include <QImageReader>
 #include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
@@ -814,10 +813,7 @@ void Dock::fetchArt(const Category &category)
     connect(reply, &QNetworkReply::finished, this, [this, reply, id = category.id, show] {
         pendingArt.remove(id); reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError || reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() != 200) return;
-        auto data = reply->readAll(); if (data.size() > 1024 * 1024) return;
-        QBuffer buffer(&data); buffer.open(QIODevice::ReadOnly); QImageReader reader(&buffer);
-        const auto size = reader.size(); if (!size.isValid() || size.width() > 2048 || size.height() > 2048) return;
-        reader.setScaledSize(QSize(90, 120)); const auto pixmap = QPixmap::fromImage(reader.read()); if (pixmap.isNull()) return;
+        const auto pixmap = QPixmap::fromImage(decodeCategoryArt(reply->readAll())); if (pixmap.isNull()) return;
         if (artCache.size() >= 100) artCache.clear(); artCache.insert(id, pixmap); show(pixmap);
     });
 }

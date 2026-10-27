@@ -99,6 +99,8 @@ Windows Smart App Control 會檢查被 OBS 載入的 DLL，不只 MSI。正式�
 
 OBS 32.2.2 使用的 Qt 6.11.1 仍有上游安全問題。外掛的 Twitch、GitHub 與圖片請求暫時停用 HTTP/2，採用 Qt 對 [CVE-2026-95620](https://www.qt.io/blog/security-advisory-cve-2026-95620) 及 [CVE-2026-96432](https://www.qt.io/blog/security-advisory-cve-2026-96432) 的緩解建議；這不影響 OBS 或其他外掛的請求。Qt 的 [CVE-2026-76151](https://www.qt.io/blog/security-advisory-cve-2026-76151) 和 [CVE-2026-101201](https://www.qt.io/blog/security-advisory-cve-2026-101201) 尚須由 OBS 所用 Qt 更新或修補解決，不能宣稱停用 HTTP/2 已修復這些問題。請依 OBS 相容版本計畫升級，不在執行中的 OBS 內單獨替換 Qt DLL。
 
+分類圖片依內容僅允許 PNG、JPEG，明確指定解碼格式並停用自動辨識，以避免外掛載入遠端 SVG 而暴露於 Qt SVG 及 XML 解析風險；其他格式不顯示封面。這不修補 Qt，也不限制 OBS 或其他外掛讀取 SVG。外掛不使用 Qt 的二進位 JSON、CBOR 或 XML API；Qt 網路快取預設未啟用，但不能視為其他 Qt 漏洞已修復。
+
 更新來源由 CMake `TCA_UPDATE_REPOSITORY` 固定為 `Chizakuraowob/obs-twitch-auto-category`；衍生專案應改成自己的儲存庫，留空可停用。檢查 `/releases/latest`，只接受 `vX.Y.Z` 或 `X.Y.Z` 的穩定版。Release 請附上 `twitch-category-assistant-X.Y.Z-windows-x64.msi`；GitHub API 必須提供該資產的 SHA-256 digest 與大小，否則拒絕內建下載。打包腳本亦產生 `.sha256` 供人工核對。
 
 0.5.8 起，使用者按下載、驗證並安裝後，外掛核對雜湊及本機 Windows 簽章狀態，確認 OBS 輸出已停止並正常關閉 OBS；本機助手等待退出、重新核對雜湊，再開啟 MSI 安裝精靈。成功才刪除 MSI，取消或失敗時保留。尚未配置作者身分釘選；同一 GitHub 來源提供的雜湊不等同作者身分保證，Windows 的權限與安全限制仍適用。發布前仍需測試簽章、升級與實際安裝；一般 CI 不會建立 Release，草稿需由維護者手動選擇版本 tag 啟動。

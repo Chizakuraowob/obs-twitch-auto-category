@@ -1,4 +1,5 @@
 #include "ui/dock.hpp"
+#include "ui/category-art.hpp"
 #include <QApplication>
 #include <QDialog>
 #include <QDir>
@@ -476,6 +477,17 @@ static bool connectedUi(const QString &output)
 int main(int argc, char **argv)
 {
     QApplication app(argc, argv);
+    QImage sample(20, 30, QImage::Format_RGB32); sample.fill(Qt::red);
+    for (const auto *format : {"PNG", "JPEG"}) {
+        QByteArray bytes; QBuffer buffer(&bytes); buffer.open(QIODevice::WriteOnly);
+        if (!sample.save(&buffer, format) || tca::decodeCategoryArt(bytes).isNull()) return 101;
+    }
+    const QByteArray svg = "<svg xmlns='http://www.w3.org/2000/svg' width='20' height='30'><rect width='20' height='30'/></svg>";
+    if (!tca::decodeCategoryArt(svg).isNull() || !tca::decodeCategoryArt(QByteArray::fromHex("89504e470d0a1a0a") + svg).isNull() ||
+        !tca::decodeCategoryArt(QByteArray(1024 * 1024 + 1, 'x')).isNull()) return 102;
+    QImage wide(2049, 1, QImage::Format_RGB32); wide.fill(Qt::red);
+    QByteArray oversized; QBuffer oversizedBuffer(&oversized); oversizedBuffer.open(QIODevice::WriteOnly);
+    if (!wide.save(&oversizedBuffer, "PNG") || !tca::decodeCategoryArt(oversized).isNull()) return 103;
     // Reproduce host-theme inheritance instead of testing only an unstyled Qt application.
     app.setStyleSheet("QWidget {color:white;background:#202126;} QListWidget::item {color:white;} QListWidget::item:selected {background:#393d49;} QComboBox QAbstractItemView {color:white;background:#202126;} QComboBox::down-arrow {image:url(:/missing-host-arrow.svg);} QScrollArea > QWidget > QWidget {background:transparent;}");
     if (!QFile::exists(":/tca/down.svg") || !QFile::exists(":/tca/up.svg")) return 21;
