@@ -20,6 +20,8 @@ function Get-Process {
 function Start-Process {
     param($FilePath, $ArgumentList, [switch]$PassThru, [switch]$Wait)
     if ($FilePath -notlike '*msiexec.exe' -or $ArgumentList -notlike '*/norestart*' -or !$Wait) { throw 'Invalid installer invocation' }
+    $expected = '/i "' + $script:expectedInstaller + '" /norestart /L*v "' + $script:expectedInstaller + '.install.log"'
+    if ($ArgumentList -cne $expected) { throw 'MSI and log paths must use native Windows separators and remain quoted.' }
     ++$script:launched
     return [pscustomobject]@{ ExitCode = $script:exitCode }
 }
@@ -38,7 +40,8 @@ try {
         $script:canExit = $case -ne 'close-cancelled'
         if ($case -eq 'hash') { [IO.File]::WriteAllText($file, 'tampered') }
         $script:launched = 0; $failed = $false
-        try { Invoke-VerifiedUpdate -ObsProcessId 1 -ObsExecutable 'C:/OBS/obs64.exe' -Installer $file -Digest $digest } catch { $failed = $true }
+        $script:expectedInstaller = [IO.Path]::GetFullPath($file).Replace('/', '\')
+        try { Invoke-VerifiedUpdate -ObsProcessId 1 -ObsExecutable 'C:/OBS/obs64.exe' -Installer $file.Replace('\', '/') -Digest $digest } catch { $failed = $true }
         $success = $case -in @('success', 'reboot', 'closed-parent')
         $expectedLaunch = if ($case -in @('hash', 'other-obs', 'close-cancelled', 'wrong-parent')) { 0 } else { 1 }
         if ($failed -eq $success -or (Test-Path -LiteralPath $file) -eq $success -or $script:launched -ne $expectedLaunch) { throw "Failed case: $case" }

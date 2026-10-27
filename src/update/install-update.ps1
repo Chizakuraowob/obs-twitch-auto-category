@@ -20,6 +20,7 @@ function Invoke-VerifiedUpdate {
     if ($ObsProcessId -le 0 -or $Digest -notmatch '^[a-fA-F0-9]{64}$' -or [IO.Path]::GetExtension($Installer) -ine '.msi') {
         throw 'Invalid update parameters. The installer has been kept.'
     }
+    $Installer = [IO.Path]::GetFullPath($Installer).Replace('/', '\')
     $process = Get-Process -Id $ObsProcessId -ErrorAction SilentlyContinue
     if ($process) {
         if ([IO.Path]::GetFullPath($process.Path) -ine [IO.Path]::GetFullPath($ObsExecutable)) { throw 'OBS process changed. The installer has been kept.' }
