@@ -1043,7 +1043,6 @@ void Dock::settingsDialog()
 
     auto *notify = detection; auto *notifications = new QCheckBox("分類不同時顯示更新詢問／建議視窗"); notifications->setChecked(config.notifications); notify->addWidget(notifications);
     auto *quiet = new QCheckBox("靜音模式：提醒不發聲，只閃爍 OBS 工作列"); quiet->setObjectName("quietMode"); quiet->setChecked(config.quietMode); notify->addWidget(quiet);
-    auto *windows = new QCheckBox("Windows 通知（此版本不支援）"); windows->setEnabled(false); notify->addWidget(windows);
     auto *live = new QCheckBox("僅在本機 OBS 串流期間顯示自動建議"); live->setChecked(config.liveOnly); notify->addWidget(live);
     auto *updates = card(layout, "版本與更新"); updates->addWidget(label("目前版本：" + QString::fromLatin1(PluginVersion) + "\nGitHub：" + QString::fromLatin1(UpdateRepository)));
     auto *updateStatus = label(updater.status); updateStatus->setObjectName("updateStatus"); updates->addWidget(updateStatus);
@@ -1230,7 +1229,7 @@ void Dock::wizard()
     policy->layout()->addWidget(label("等待時間：15–600 秒（最長 10 分鐘）。請輸入範圍內的整數。\n最後一款已確認遊戲退出後計時；只提出建議，不自動切換。"));
     auto *chattingDelay = new QSpinBox; chattingDelay->setObjectName("chattingDelay"); chattingDelay->setRange(15, 600); chattingDelay->setSuffix(" 秒"); chattingDelay->setValue(config.chattingDelay); chattingDelay->setEnabled(chatting->isChecked()); policy->layout()->addWidget(chattingDelay);
     connect(chatting, &QCheckBox::toggled, chattingDelay, &QWidget::setEnabled);
-    auto *notice = page("通知偏好", "通知顯示於 OBS Dock。Windows 系統通知在此版本不支援。");
+    auto *notice = page("通知偏好", "分類提醒會顯示在 OBS 的提醒視窗。");
     auto *notify = new QCheckBox("OBS Dock 內通知"); notify->setChecked(config.notifications); notice->layout()->addWidget(notify);
     auto *quiet = new QCheckBox("靜音模式：提醒不發聲，只閃爍 OBS 工作列"); quiet->setObjectName("quietMode"); quiet->setChecked(config.quietMode); notice->layout()->addWidget(quiet);
     auto *live = new QCheckBox("僅在 OBS 串流時提出自動建議"); live->setChecked(config.liveOnly); notice->layout()->addWidget(live);
