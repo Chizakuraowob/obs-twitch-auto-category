@@ -12,7 +12,7 @@
 
 <img src="docs/images/dock-preview.png" alt="Twitch 分類助手面板" width="380">
 
-畫面為測試帳號示意，實際內容會依帳號與設定改變。
+畫面使用測試資料示意，登入狀態與收藏內容會依個人設定改變。
 
 ## 安裝
 

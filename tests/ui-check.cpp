@@ -582,6 +582,7 @@ int main(int argc, char **argv)
     int result = 0;
     QTimer::singleShot(100, &app, [&] {
         if (!dock.grab().save(output + "/dock-dark.png")) result = 3;
+        if (!tca::DockTestAccess::preview(dock, output + "/dock-preview-dark.png")) result = 3;
         dock.resize(280, 700); app.processEvents();
         if (!dock.grab().save(output + "/dock-narrow.png")) result = 4;
         QPushButton *settingsButton = nullptr;
